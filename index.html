@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Idle Muscle Clicker Game</title>
+    <!-- Supabase JS SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body {
+            background-color: #1a1a2e;
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 20px;
+        }
+        .game-container {
+            max-width: 400px;
+            margin: auto;
+            background: #16213e;
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.5);
+        }
+        .stats {
+            font-size: 18px;
+            margin: 10px 0;
+            background: #0f3460;
+            padding: 10px;
+            border-radius: 8px;
+        }
+        .character-box {
+            font-size: 80px;
+            margin: 20px 0;
+            cursor: pointer;
+            user-select: none;
+            transition: transform 0.1s;
+        }
+        .character-box:active {
+            transform: scale(0.9);
+        }
+        button {
+            background-color: #e94560;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            font-size: 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 5px;
+            width: 100%;
+            font-weight: bold;
+        }
+        button:hover {
+            background-color: #ff6b81;
+        }
+        input {
+            padding: 10px;
+            border-radius: 5px;
+            border: none;
+            margin-bottom: 10px;
+            width: 80%;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="game-container">
+        <h2>Titan Muscle Idle</h2>
+        
+        <!-- Login / Identifikasi Player Sederhana -->
+        <div id="auth-section">
+            <input type="text" id="username" placeholder="Masukkan Nama Player...">
+            <button onclick="loadGame()">Mulai / Muat Game</button>
+        </div>
+
+        <!-- Area Game Utama -->
+        <div id="game-section" style="display: none;">
+            <div class="stats">
+                <div>Level: <span id="level-display">1</span></div>
+                <div>Coins (Bulan): <span id="coin-display">0</span></div>
+                <div>Kekuatan (Power): <span id="power-display">1</span></div>
+            </div>
+
+            <!-- Karakter yang diklik -->
+            <div class="character-box" onclick="tapCharacter()">🏋️‍♂️</div>
+            <p><i>Klik karakter untuk latih otot & dapatkan koin!</i></p>
+
+            <button onclick="upgradePower()">Upgrade Power (Harga: <span id="upgrade-cost">10</span>)</button>
+            <button onclick="saveGame()" style="background-color: #2ecc71;">Simpan ke Supabase</button>
+        </div>
+    </div>
+
+    <script>
+        // Konfigurasi Supabase Kamu (Isi dengan URL & Anon Key dari project Supabase kamu)
+        const SUPABASE_URL = 'GANTI_DENGAN_SUPABASE_URL';
+        const SUPABASE_KEY = 'GANTI_DENGAN_SUPABASE_ANON_KEY';
+        const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        let playerData = {
+            username: '',
+            level: 1,
+            coins: 0,
+            strength: 1
+        };
+
+        async function loadGame() {
+            const usernameInput = document.getElementById('username').value.trim();
+            if (!usernameInput) {
+                alert('Nama player tidak boleh kosong!');
+                return;
+            }
+            playerData.username = usernameInput;
+
+            // Cek data di Supabase
+            let { data, error } = await _supabase
+                .from('player_saves')
+                .select('*')
+                .eq('username', playerData.username)
+                .single();
+
+            if (data) {
+                // Jika data sudah ada, muat
+                playerData.level = data.level;
+                playerData.coins = data.coins;
+                playerData.strength = data.strength;
+                alert('Data game berhasil dimuat!');
+            } else {
+                // Jika belum ada, buat baru
+                await _supabase.from('player_saves').insert([
+                    { username: playerData.username, level: 1, coins: 0, strength: 1 }
+                ]);
+                alert('Akun baru dibuat!');
+            }
+
+            // Tampilkan area game, sembunyikan login
+            document.getElementById('auth-section').style.display = 'none';
+            document.getElementById('game-section').style.display = 'block';
+            updateUI();
+        }
+
+        function tapCharacter() {
+            playerData.coins += playerData.strength;
+            
+            // Sistem naik level sederhana (tiap 100 koin naik level)
+            if (playerData.coins >= playerData.level * 100) {
+                playerData.level++;
+                alert('🎉 Selamat! Level kamu naik jadi ' + playerData.level);
+            }
+            updateUI();
+        }
+
+        function upgradePower() {
+            let cost = playerData.strength * 10;
+            if (playerData.coins >= cost) {
+                playerData.coins -= cost;
+                playerData.strength++;
+                alert('Power berhasil ditingkatkan!');
+            } else {
+                alert('Koin tidak cukup!');
+            }
+            updateUI();
+        }
+
+        function updateUI() {
+            document.getElementById('level-display').innerText = playerData.level;
+            document.getElementById('coin-display').innerText = playerData.coins;
+            document.getElementById('power-display').innerText = playerData.strength;
+            document.getElementById('upgrade-cost').innerText = playerData.strength * 10;
+        }
+
+        async function saveGame() {
+            const { error } = await _supabase
+                .from('player_saves')
+                .update({
+                    level: playerData.level,
+                    coins: playerData.coins,
+                    strength: playerData.strength,
+                    updated_at: new Date()
+                })
+                .eq('username', playerData.username);
+
+            if (error) {
+                alert('Gagal menyimpan: ' + error.message);
+            } else {
+                alert('💾 Progress berhasil disimpan ke Supabase!');
+            }
+        }
+    </script>
+</body>
+</html>
