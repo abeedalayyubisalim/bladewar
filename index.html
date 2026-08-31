@@ -354,6 +354,12 @@ const SWORD_VISUAL_LEN = 34;
 const BLADE_HALF_WIDTH = 11;
 const MAX_SKILL_SLOTS = 3;
 
+// "Swordsman" creeps: a special enemy that carries its own orbiting blade(s), can grab field
+// sword pickups to power up, and duels blade-to-blade with the player (weaker blade breaks).
+const SWORDSMAN_MAX_SWORDS = 6;
+const SWORDSMAN_PICKUP_RANGE = 260;
+const CLASH_COOLDOWN = 260; // ms, per creep — how often a blade-vs-blade clash can resolve
+
 const SKILLS = [
   { key:"electric", label:"Petir",  icon:"⚡", color:"#4dd8ff",
     desc:"Otomatis nyamber hingga 4 musuh terdekat di sekitarmu setiap 7 detik.",
@@ -421,6 +427,22 @@ function pointSegDist(px,py,x1,y1,x2,y2){
 function colorForId(id){
   let h=0; for(let i=0;i<id.length;i++) h = (h*31 + id.charCodeAt(i))>>>0;
   return `hsl(${h%360} 70% 60%)`;
+}
+// cheap segment-vs-segment distance approximation (min of endpoint-to-opposite-segment checks) —
+// good enough for short blade-length segments like ours
+function segSegDist(x1,y1,x2,y2,x3,y3,x4,y4){
+  return Math.min(
+    pointSegDist(x1,y1,x3,y3,x4,y4),
+    pointSegDist(x2,y2,x3,y3,x4,y4),
+    pointSegDist(x3,y3,x1,y1,x2,y2),
+    pointSegDist(x4,y4,x1,y1,x2,y2)
+  );
+}
+function swordSegment(cx,cy,angle,R){
+  return [
+    cx + Math.cos(angle)*(R-SWORD_VISUAL_LEN*0.5), cy + Math.sin(angle)*(R-SWORD_VISUAL_LEN*0.5),
+    cx + Math.cos(angle)*(R+SWORD_VISUAL_LEN*0.6), cy + Math.sin(angle)*(R+SWORD_VISUAL_LEN*0.6),
+  ];
 }
 
 /* ================= AUDIO (procedural, no external files needed) ================= */
@@ -592,6 +614,16 @@ function newPlayer(){
 
 function orbitRadius(p){ return BASE_ORBIT_RADIUS + (p.swords.length-1)*ORBIT_RADIUS_PER_SWORD; }
 function spinSpeed(p){ return BASE_SPIN_SPEED + p.level*SPIN_SPEED_PER_LEVEL; }
+
+// swordsman creeps orbit their own (smaller, slower) blade set — independent of player leveling
+function creepOrbitRadius(c){ return 30 + (c.swords.length-1)*3; }
+function creepSpinSpeed(c){ return 2.0 + (c.swords.length-1)*0.08; }
+function creepAddSword(c, tier){
+  if(c.swords.length < SWORDSMAN_MAX_SWORDS){ c.swords.push({ ...tier }); return; }
+  let weakestIdx = 0;
+  for(let i=1;i<c.swords.length;i++) if(c.swords[i].dmg < c.swords[weakestIdx].dmg) weakestIdx = i;
+  if(tier.dmg > c.swords[weakestIdx].dmg) c.swords[weakestIdx] = { ...tier };
+}
 
 function addSword(p, tier){
   // early game: freely grow the number of orbiting swords (the "gasing" fantasy)
@@ -877,7 +909,6 @@ function updateWaveAnnounce(){
 
 /* ---------- Creeps ---------- */
 function spawnCreep(){
-  const brute = elapsed > 60 && Math.random() < Math.min(0.28, elapsed/900);
   const margin = 60;
   // spawn just outside camera view but inside world
   let x,y;
@@ -892,6 +923,31 @@ function spawnCreep(){
   const hpScale = (1 + t/45) * waveHpMult(wave);
   const dmgScale = (1 + t/90) * waveDmgMult(wave);
   const spdMult = waveSpeedMult(wave);
+
+  // swordsman: a special creep that carries its own orbiting blade, hunts field pickups to
+  // power up, and can duel-clash blades with the player instead of just trading HP damage
+  const swordsmanChance = elapsed > 90 ? Math.min(0.16, elapsed/1400) : 0;
+  const swordsman = Math.random() < swordsmanChance;
+  const brute = !swordsman && elapsed > 60 && Math.random() < Math.min(0.28, elapsed/900);
+
+  if(swordsman){
+    creeps.push({
+      id: uid(), x, y,
+      radius: 17,
+      hp: 34*hpScale, maxHp: 34*hpScale,
+      dmg: 5*dmgScale, // fallback body-contact damage — its real threat is the blade
+      speed: rand(65,95)*spdMult,
+      expValue: 22,
+      swordsman: true, brute:false,
+      swords: [ { ...SWORD_TIERS[0] } ],
+      spinAngle: rand(0,Math.PI*2),
+      hitTimers: {},
+      lastClashAt: 0,
+      lastTouch: -9999,
+    });
+    return;
+  }
+
   creeps.push({
     id: uid(), x, y,
     radius: brute? 26: 15,
@@ -960,6 +1016,45 @@ function updateBossSpawning(dt){
 function updateCreeps(dt){
   for(const c of creeps){
     if(c.hp<=0) continue;
+
+    if(c.swordsman){
+      c.spinAngle = (c.spinAngle||0) + creepSpinSpeed(c)*dt;
+
+      const dPlayer = Math.hypot(player.x-c.x, player.y-c.y);
+      if(dPlayer > CREEP_DESPAWN_RADIUS){ c.hp = 0; continue; }
+
+      // hunt the nearest field pickup to power up its blade before it's fully armed
+      let seek = null;
+      if(c.swords.length < SWORDSMAN_MAX_SWORDS){
+        let bestD = SWORDSMAN_PICKUP_RANGE*SWORDSMAN_PICKUP_RANGE;
+        for(const pu of pickups){
+          const dd = dist2(pu.x,pu.y,c.x,c.y);
+          if(dd < bestD){ bestD = dd; seek = pu; }
+        }
+      }
+
+      const tx = seek? seek.x : player.x, ty = seek? seek.y : player.y;
+      const dx = tx-c.x, dy = ty-c.y;
+      const d = Math.hypot(dx,dy)||1;
+      // when hunting the player it holds at blade range rather than pressing to body contact —
+      // it's a duelist, not a brawler: all its damage comes from trySwordsmanBladeHits() below
+      const stopDist = seek? c.radius+10 : (creepOrbitRadius(c) + SWORD_VISUAL_LEN*0.6 + player.radius - 6);
+      if(d > stopDist){
+        c.x += dx/d*c.speed*dt;
+        c.y += dy/d*c.speed*dt;
+      }
+
+      if(seek && d < c.radius+16){
+        const idx = pickups.indexOf(seek);
+        if(idx>=0){
+          creepAddSword(c, seek.tier);
+          pickups.splice(idx,1);
+          playPickup();
+        }
+      }
+      continue;
+    }
+
     const dx = player.x-c.x, dy = player.y-c.y;
     const d = Math.hypot(dx,dy)||1;
     if(d > CREEP_DESPAWN_RADIUS){ c.hp = 0; continue; } // far behind — recycle it, a fresh one will spawn nearby instead
@@ -1029,6 +1124,73 @@ function trySwordHits(p, targetsAreCreeps){
   }
 }
 
+// swordsman creeps hit the player with their own spinning blade (reach extends past their body),
+// and clash blade-vs-blade with the player instead of just letting hits pass through each other
+function trySwordsmanBladeHits(){
+  const now = performance.now();
+  for(const c of creeps){
+    if(c.hp<=0 || !c.swordsman) continue;
+    const R = creepOrbitRadius(c);
+    for(let j=0;j<c.swords.length;j++){
+      const angle = c.spinAngle + (j/c.swords.length)*Math.PI*2;
+      const [x1,y1,x2,y2] = swordSegment(c.x,c.y,angle,R);
+      const dd = pointSegDist(player.x,player.y,x1,y1,x2,y2);
+      if(dd < BLADE_HALF_WIDTH + player.radius){
+        const last = c.hitTimers[j] || 0;
+        if(now-last > HIT_COOLDOWN){
+          c.hitTimers[j] = now;
+          tryDamagePlayer(player, c.swords[j].dmg, c);
+        }
+      }
+    }
+  }
+}
+
+function trySwordVsSwordsmanClash(){
+  const R = orbitRadius(player);
+  const now = performance.now();
+  for(const c of creeps){
+    if(c.hp<=0 || !c.swordsman) continue;
+    if(now - (c.lastClashAt||0) < CLASH_COOLDOWN) continue;
+    const cR = creepOrbitRadius(c);
+    let clashed = false;
+    for(let i=0;i<player.swords.length && !clashed;i++){
+      const pAngle = player.spinAngle + (i/player.swords.length)*Math.PI*2;
+      const [px1,py1,px2,py2] = swordSegment(player.x,player.y,pAngle,R);
+      for(let j=0;j<c.swords.length;j++){
+        const cAngle = c.spinAngle + (j/c.swords.length)*Math.PI*2;
+        const [cx1,cy1,cx2,cy2] = swordSegment(c.x,c.y,cAngle,cR);
+        const dd = segSegDist(px1,py1,px2,py2, cx1,cy1,cx2,cy2);
+        if(dd < BLADE_HALF_WIDTH*2){
+          c.lastClashAt = now;
+          resolveClash(player, i, c, j);
+          clashed = true;
+          break;
+        }
+      }
+    }
+  }
+}
+
+function resolveClash(pOwner, pIdx, cOwner, cIdx){
+  const sa = pOwner.swords[pIdx], sb = cOwner.swords[cIdx];
+  if(!sa || !sb) return;
+  playClang();
+  if(sa.dmg === sb.dmg){
+    spawnFloater((pOwner.x+cOwner.x)/2, (pOwner.y+cOwner.y)/2 - 20, "Beradu!", "#ffd43b");
+    return;
+  }
+  const playerLoses = sa.dmg < sb.dmg;
+  const loserOwner = playerLoses? pOwner : cOwner;
+  const loserIdx = playerLoses? pIdx : cIdx;
+  if(loserOwner.swords.length <= 1) return; // never fully disarm — always keep at least one blade
+  const lost = loserOwner.swords[loserIdx];
+  loserOwner.swords.splice(loserIdx,1);
+  spawnFloater(loserOwner.x, loserOwner.y-30, "Blade pecah!", lost.color);
+  playHurt();
+  if(playerLoses) showBanner("💥 Bladamu kalah beradu, satu pecah!");
+}
+
 function killCreep(c){
   c.hp = 0;
   gainExp(player, c.expValue, c.x, c.y);
@@ -1042,6 +1204,14 @@ function killCreep(c){
     for(let i=0;i<3;i++){
       pickups.push({ x:c.x+rand(-40,40), y:c.y+rand(-40,40), tier: weightedBruteTier(), id: uid() });
     }
+    return;
+  }
+  if(c.swordsman){
+    showBanner("⚔ Musuh bersenjata tumbang!");
+    // defeating a swordsman drops every blade it was carrying — worth hunting down
+    c.swords.forEach(sw=>{
+      pickups.push({ x:c.x+rand(-24,24), y:c.y+rand(-24,24), tier: tierByKey(sw.key), id: uid() });
+    });
     return;
   }
   const dropChance = c.brute? 0.85 : 0.22;
@@ -1220,6 +1390,8 @@ function loop(t){
   updateBossSpawning(dt);
   updateCreeps(dt);
   trySwordHits(player, true);
+  trySwordsmanBladeHits();
+  trySwordVsSwordsmanClash();
   spawnPickupsAmbient(dt);
   spawnSkillOrbsAmbient(dt);
   spawnBladePackAmbient(dt);
@@ -1471,10 +1643,28 @@ function drawCreep(c){
   const s = worldToScreen(c.x,c.y);
   if(s.x<-90||s.x>canvas.width+90||s.y<-90||s.y>canvas.height+90) return;
   if(c.boss){ drawBoss(c, s); return; }
+  if(c.swordsman){ drawSwordsmanCreep(c, s); return; }
   ctx.beginPath(); ctx.arc(s.x,s.y,c.radius,0,Math.PI*2);
   ctx.fillStyle = c.brute? "#a13b3b" : "#5c6b8a";
   ctx.fill();
   ctx.lineWidth=2; ctx.strokeStyle="rgba(0,0,0,0.4)"; ctx.stroke();
+  const bw=c.radius*2, bh=4;
+  ctx.fillStyle="rgba(0,0,0,0.5)"; ctx.fillRect(s.x-bw/2, s.y-c.radius-10, bw, bh);
+  ctx.fillStyle="#ff5b5b"; ctx.fillRect(s.x-bw/2, s.y-c.radius-10, bw*clamp(c.hp/c.maxHp,0,1), bh);
+}
+
+function drawSwordsmanCreep(c, s){
+  const R = creepOrbitRadius(c);
+  for(let j=0;j<c.swords.length;j++){
+    const angle = c.spinAngle + (j/c.swords.length)*Math.PI*2;
+    const sx = s.x + Math.cos(angle)*R;
+    const sy = s.y + Math.sin(angle)*R;
+    drawSwordShape(sx, sy, angle, c.swords[j].color, 26);
+  }
+  ctx.beginPath(); ctx.arc(s.x,s.y,c.radius,0,Math.PI*2);
+  ctx.fillStyle = "#3d2b52";
+  ctx.fill();
+  ctx.lineWidth=2; ctx.strokeStyle="#b563ff"; ctx.stroke();
   const bw=c.radius*2, bh=4;
   ctx.fillStyle="rgba(0,0,0,0.5)"; ctx.fillRect(s.x-bw/2, s.y-c.radius-10, bw, bh);
   ctx.fillStyle="#ff5b5b"; ctx.fillRect(s.x-bw/2, s.y-c.radius-10, bw*clamp(c.hp/c.maxHp,0,1), bh);
