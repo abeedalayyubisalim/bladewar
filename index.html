@@ -255,12 +255,12 @@
   <div class="menu-wrap">
     <div class="menu-card">
       <div class="title">BLADEWAR</div>
-      <div class="subtitle">Spin and Clash.</div>
+      <div class="subtitle">Kumpulin pedang, spin, bantai musuh.</div>
 
       <label for="nameInput">Nama Kamu</label>
       <input type="text" id="nameInput" maxlength="14" placeholder="Player">
 
-      <button class="btn btn-survival" id="btnSurvival">Single Player</button>
+      <button class="btn btn-survival" id="btnSurvival">⚔ Survival (Single Player)</button>
 
       <label for="roomInput" style="margin-top:18px;">Kode Room Multiplayer</label>
       <div class="row">
@@ -268,26 +268,26 @@
       </div>
       <label style="margin-top:14px;">Mode Multiplayer</label>
       <div class="mode-toggle">
-        <button type="button" class="mode-btn active" id="btnModeVersus">VS</button>
-        <button type="button" class="mode-btn" id="btnModeCoop">Partner</button>
+        <button type="button" class="mode-btn active" id="btnModeVersus">⚔ Saling Lawan</button>
+        <button type="button" class="mode-btn" id="btnModeCoop">🤝 Berteman</button>
       </div>
-      <button class="btn btn-mp" id="btnMulti">Multiplayer</button>
+      <button class="btn btn-mp" id="btnMulti">🌐 Masuk Multiplayer</button>
     </div>
 
     <div class="menu-col">
       <div class="side-panel">
-        <h3>Enemy</h3>
+        <h3>Galeri Musuh</h3>
         <div id="enemyGallery" class="panel-body"></div>
       </div>
       <div class="side-panel">
-        <h3>Skill</h3>
+        <h3>Galeri Skill</h3>
         <div id="skillGallery" class="panel-body"></div>
       </div>
     </div>
 
     <div class="menu-col">
       <div class="side-panel">
-        <h3>Blade</h3>
+        <h3>Galeri Senjata</h3>
         <div id="swordGallery" class="panel-body"></div>
       </div>
       <div id="leaderboard">
@@ -1361,7 +1361,18 @@ function connectMultiplayer(){
 
   channel.on("broadcast", {event:"state"}, ({payload})=>{
     if(payload.id===myId) return;
-    remotePlayers.set(payload.id, { ...payload, lastSeen: performance.now() });
+    const now = performance.now();
+    const existing = remotePlayers.get(payload.id);
+    // network updates only arrive every BROADCAST_INTERVAL (~90ms) — snapping straight to each new
+    // x/y made remote players look choppy ("patah2") against our own smooth 60fps local movement.
+    // Keep the currently-displayed x/y and let updateRemoteInterpolation() ease toward the new target
+    // every frame instead; spin angle is extrapolated forward client-side (see drawRemotePlayer) since
+    // it's just level*speed, so the orbiting blades don't visibly stall between packets either.
+    const merged = { ...payload, lastSeen: now, targetX: payload.x, targetY: payload.y,
+      spinBase: payload.spinAngle, spinBaseT: now };
+    if(existing){ merged.x = existing.x; merged.y = existing.y; }
+    else { merged.x = payload.x; merged.y = payload.y; }
+    remotePlayers.set(payload.id, merged);
   });
 
   channel.on("broadcast", {event:"hit"}, ({payload})=>{
@@ -1416,6 +1427,17 @@ function pruneRemotePlayers(){
   const now = performance.now();
   for(const [id,rp] of remotePlayers){
     if(now - rp.lastSeen > 5000) remotePlayers.delete(id);
+  }
+}
+
+// eases each remote player's displayed x/y toward the latest network position every frame,
+// instead of snapping on each ~90ms packet — this is what actually smooths out the movement
+function updateRemoteInterpolation(dt){
+  const smooth = 1 - Math.exp(-16*dt);
+  for(const [id,rp] of remotePlayers){
+    if(rp.targetX==null) continue;
+    rp.x += (rp.targetX-rp.x)*smooth;
+    rp.y += (rp.targetY-rp.y)*smooth;
   }
 }
 
@@ -1479,6 +1501,7 @@ function loop(t){
   spawnBladePackAmbient(dt);
 
   if(mode==="multiplayer"){
+    updateRemoteInterpolation(dt);
     broadcastState();
     checkPvpHits();
     pruneRemotePlayers();
@@ -1701,10 +1724,12 @@ function drawPlayer(p, color, name, isMe){
 function drawRemotePlayer(rp){
   const s = worldToScreen(rp.x, rp.y);
   if(s.x<-80||s.x>canvas.width+80||s.y<-80||s.y>canvas.height+80) return;
-  const fakeP = { swords: new Array(rp.swordCount||0).fill(0).map(()=>({color:"#8899ff"})), spinAngle: rp.spinAngle||0 };
+  // spin angle only arrives every ~90ms too — extrapolate it forward client-side (spin speed is
+  // purely a function of level) so the orbiting blades keep spinning smoothly between packets
+  const spinNow = (rp.spinBase||0) + spinSpeed({level:rp.level||1})*((performance.now()-(rp.spinBaseT||performance.now()))/1000);
   const R = rp.orbitR || (BASE_ORBIT_RADIUS + ((rp.swordCount||1)-1)*ORBIT_RADIUS_PER_SWORD);
   for(let i=0;i<(rp.swordCount||0);i++){
-    const angle = (rp.spinAngle||0) + (i/(rp.swordCount||1))*Math.PI*2;
+    const angle = spinNow + (i/(rp.swordCount||1))*Math.PI*2;
     const sx = s.x + Math.cos(angle)*R;
     const sy = s.y + Math.sin(angle)*R;
     drawSwordShape(sx, sy, angle, "#9aa8ff", 30);
@@ -2009,8 +2034,8 @@ const ENEMY_INFO = [
     desc:"Musuh dasar yang ngejar dan nabrak kamu. Gampang dikalahin, kadang drop pedang." },
   { key:"brute", label:"Brute", color:"#ff6b6b", icon:"●",
     desc:"HP lebih tebal dan pukulannya sakit. Hampir selalu drop pedang bagus kalau berhasil dikalahin." },
-  { key:"swordsman", label:"Weaponized", color:"#c58bff", icon:"⚔️",
-    desc:"Punya blade sendiri yang ikut muter. Bisa ambil pedang di field buat naikin kekuatan, dan bisa beradu blade." },
+  { key:"swordsman", label:"Musuh Bersenjata", color:"#c58bff", icon:"⚔️",
+    desc:"Punya blade sendiri yang ikut muter. Bisa ambil pedang di field buat naikin kekuatan, dan bisa beradu blade — yang lebih lemah bakal pecah." },
   { key:"boss", label:"Boss", color:"#ff2d4d", icon:"💀",
     desc:"Muncul tiap gelombang (3 menit sekali). HP dan damage-nya besar, tapi selalu drop Blade Pack + pedang bagus kalau dikalahin." },
 ];
@@ -2037,7 +2062,7 @@ function renderSwordGallery(){
 }
 function renderSkillGallery(){
   document.getElementById("skillGallery").innerHTML = `<div style="font-size:11px; color:var(--text-dim); margin-bottom:8px; line-height:1.4;">
-      3 slot <b>pasif</b> skill
+      3 slot skill, didapat dari orb di field, cuma berlaku selama game jalan. Semua skill <b>pasif</b> — otomatis aktif sendiri tiap cooldown, nggak perlu ditekan.
     </div>` + SKILLS.map(s=>`
     <div class="gitem" style="border-left-color:${s.color}">
       <div class="gitem-icon" style="color:${s.color}">${s.icon}</div>
