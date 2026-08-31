@@ -151,6 +151,23 @@
   }
   #minimap{ display:block; width:100%; height:100%; border-radius:6px; }
 
+  #chatBox{
+    position:absolute; right:14px; bottom:14px; width:220px; pointer-events:auto;
+    background: rgba(15,17,28,0.72); border:1px solid #2b3050; border-radius:10px;
+    padding:8px; box-shadow: 0 4px 16px rgba(0,0,0,0.4); display:flex; flex-direction:column; gap:6px;
+  }
+  #chatLog{ max-height:110px; overflow-y:auto; font-size:11px; line-height:1.4; display:flex; flex-direction:column; gap:2px; }
+  #chatLog .chat-line b{ color:#8be9ff; }
+  #chatLog .chat-line.me b{ color:#ffd43b; }
+  #chatForm{ display:flex; gap:6px; }
+  #chatInput{
+    flex:1; min-width:0; background:#12141f; border:1px solid #2b3050; border-radius:6px;
+    color:var(--text); font-size:11px; padding:5px 7px;
+  }
+  #chatForm button{
+    background:#3a4270; border:none; border-radius:6px; color:#fff; font-size:11px; padding:5px 9px; cursor:pointer;
+  }
+
   #joystick-zone{ position:absolute; left:0; bottom:0; width:45%; height:45%; z-index:6; }
   #joystick-base{
     position:absolute; width:110px; height:110px; border-radius:50%; background: rgba(255,255,255,0.07);
@@ -182,6 +199,9 @@
   /* ---------- Results ---------- */
   #results{
     position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background: rgba(5,6,10,0.85); z-index:20;
+  }
+  #roomSummaryModal{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background: rgba(5,6,10,0.85); z-index:30;
   }
   .result-card{ background: var(--panel); border:1px solid #2b3050; border-radius:16px; padding:30px 34px; width:min(380px,90vw); text-align:center;}
   .result-card h2{ margin:0 0 4px; font-size:26px; }
@@ -324,6 +344,13 @@
   <div id="minimap-box">
     <canvas id="minimap" width="140" height="140"></canvas>
   </div>
+  <div id="chatBox" class="hidden">
+    <div id="chatLog"></div>
+    <form id="chatForm" autocomplete="off">
+      <input id="chatInput" type="text" maxlength="80" placeholder="Chat ke tim…" />
+      <button type="submit">Kirim</button>
+    </form>
+  </div>
 </div>
 
 <div id="joystick-zone" class="hidden">
@@ -344,6 +371,10 @@
   <div class="exit-card">
     <h3>Keluar dari game?</h3>
     <p>Progress kamu (level &amp; waktu bertahan) bakal otomatis kesimpen ke leaderboard sebelum keluar.</p>
+    <div id="roomControls" class="hidden" style="margin:4px 0 12px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.12);">
+      <p style="font-size:12px; color:var(--text-dim); margin:0 0 8px;">Kamu pembuat room ini. Akhiri buat nutup room ini permanen dan langsung tampilin rekap ke semua yang lagi main.</p>
+      <button class="btn btn-secondary" id="btnEndRoom">🏁 Akhiri Room</button>
+    </div>
     <button class="btn btn-secondary" id="btnResumeGame">Lanjut Main</button>
     <button class="btn btn-survival" id="btnConfirmExit">Simpan &amp; Keluar</button>
   </div>
@@ -360,7 +391,18 @@
       <div><span id="resPoints">0</span><span>Poin</span></div>
     </div>
     <div class="sub" id="scoreStatus" style="min-height:16px;"></div>
+    <button class="btn btn-survival hidden" id="btnRespawnRoom">Main Lagi</button>
     <button class="btn btn-secondary" id="btnBackMenu">Kembali ke Menu</button>
+  </div>
+</div>
+
+<div id="roomSummaryModal" class="hidden">
+  <div class="exit-card" style="max-width:440px;">
+    <h3>🏁 Rekap Room</h3>
+    <div class="sub" id="roomSummarySub">Room sudah berakhir.</div>
+    <div id="roomSummaryBosses" style="margin:12px 0; font-size:13px; line-height:1.5;"></div>
+    <div id="roomSummaryPlayers" style="max-height:240px; overflow-y:auto; margin:0 0 14px;"></div>
+    <button class="btn btn-secondary" id="btnCloseRoomSummary">Kembali ke Menu</button>
   </div>
 </div>
 
@@ -663,6 +705,20 @@ function currentHostId(){
   return min;
 }
 function isHost(){ return mode !== "multiplayer" || currentHostId() === myId; }
+
+// Persistent "Room" state (see bladewar_setup.sql v4) — separate from the ephemeral realtime-only
+// multiplayer above, which still works on its own if Supabase is unreachable. A Room has a real row
+// in the database: a shared clock (created_at) so latecomers face the same difficulty, a permanent
+// record of which bosses got beaten, and per-player stats (kills/deaths/points) keyed by the same
+// persistent player_id already used for the survival leaderboard, so leaving and rejoining doesn't
+// lose progress.
+let roomIsActive = false;   // true once room_join_or_create succeeded for the current session
+let roomIsCreator = false;  // true if *I* created this room — only the creator can end it
+let roomEnded = false;      // true if this room was already permanently closed
+let roomStatsSnapshot = { kills:0, points:0, deaths:0 }; // last cumulative values flushed to the DB
+let deathCount = 0;         // how many times *I* have died in the current play/room session
+let lastRoomFlush = 0;
+const ROOM_FLUSH_INTERVAL = 6000; // ms
 
 function newPlayer(){
   return {
@@ -1465,6 +1521,9 @@ function killCreep(c){
     // each get their own kill credit + reward, even though only the host's copy actually tracked the hp
     if(mode==="multiplayer" && channel && !c.netBoss){
       channel.send({type:"broadcast", event:"bossDeath", payload:{ netId:c.id, x:c.x, y:c.y, name:c.name, expValue:c.expValue }});
+      if(roomIsActive && sb){
+        sb.rpc("room_add_boss", { p_room: roomCode, p_boss_name: c.name }).catch(e=>console.warn("room_add_boss failed", e));
+      }
     }
     return;
   }
@@ -1539,7 +1598,15 @@ function updatePickups(){
 function connectMultiplayer(){
   if(!sb){ setConn(false,"supabase gagal dimuat"); return; }
   roomCode = (document.getElementById("roomInput").value||"public").trim().toLowerCase() || "public";
+  roomIsActive = false; roomIsCreator = false; roomEnded = false;
   channel = sb.channel("bladewar-"+roomCode, { config: { broadcast: { self:false }, presence: { key: myId } } });
+  joinRoom(); // async, independent of the realtime channel above — see function for what it does on success/failure
+
+  channel.on("broadcast", {event:"roomEnded"}, ()=>{
+    roomEnded = true;
+    submitScore(); // fold my current progress into the survival leaderboard too, same as whoever ended it
+    showRoomSummary(roomCode, "Room ini baru saja diakhiri oleh pembuatnya.");
+  });
 
   channel.on("broadcast", {event:"state"}, ({payload})=>{
     if(payload.id===myId) return;
@@ -1604,6 +1671,12 @@ function connectMultiplayer(){
     remotePlayers.delete(payload.id);
   });
 
+  // simple ephemeral chat, piggybacking the same room channel — nothing persisted, just live text
+  // between whoever's currently connected, like the boss/orb sync but for talking to each other
+  channel.on("broadcast", {event:"chat"}, ({payload})=>{
+    addChatLine(payload.name||"?", payload.text, false);
+  });
+
   channel.subscribe((status)=>{
     if(status==="SUBSCRIBED"){ setConn(true, "room: "+roomCode); }
     else if(status==="CHANNEL_ERROR" || status==="TIMED_OUT"){ setConn(false, "koneksi gagal"); }
@@ -1618,6 +1691,92 @@ function disconnectMultiplayer(){
     channel = null;
   }
   remotePlayers.clear();
+  roomIsActive = false; roomIsCreator = false;
+}
+
+// joinRoom: called (fire-and-forget) right after opening the realtime channel. Creates the room row
+// if this room_code is brand new (I become the creator), or joins the existing one without touching
+// its created_at — that's the whole point: everyone's difficulty/wave/boss timing is driven by
+// elapsed, so jumping elapsed forward to match how long the room has actually existed means a
+// latecomer faces the exact same challenge as everyone already inside instead of starting at 00:00.
+async function joinRoom(){
+  if(!sb) return;
+  try{
+    const { data, error } = await sb.rpc("room_join_or_create", {
+      p_room: roomCode, p_player_id: myPlayerId, p_name: playerName,
+    });
+    if(error) throw error;
+    if(data.ended_at){
+      // per design: a room that's been "Diakhiri" is closed for good — no more playing under that
+      // code, only the recap. Bail out of the realtime session we just opened and show it instead.
+      roomEnded = true;
+      disconnectMultiplayer();
+      showRoomSummary(data.room_code, "Room ini sudah diakhiri sebelumnya — bikin room baru buat main bareng lagi.");
+      return;
+    }
+    roomIsActive = true;
+    roomIsCreator = (data.created_by === myPlayerId);
+    const createdMs = new Date(data.created_at).getTime();
+    if(!Number.isNaN(createdMs)){
+      elapsed = Math.max(0, (Date.now()-createdMs)/1000);
+      announcedWave = currentWave(); // avoid re-announcing every wave we jumped straight past
+    }
+    roomStatsSnapshot = { kills, points: computePoints(player.level, kills, Math.floor(elapsed)), deaths: deathCount };
+  }catch(e){
+    console.warn("room join failed", e); // no persistent room this session — plain ephemeral multiplayer still works
+  }
+}
+
+// flushRoomStats: reports only what changed since the last flush (deltas), via the atomic
+// room_bump_stats RPC, so several players writing at once never clobber each other's counts.
+async function flushRoomStats(){
+  if(!sb || !roomIsActive || roomEnded) return;
+  const curPoints = computePoints(player.level, kills, Math.floor(elapsed));
+  const dKills = kills - roomStatsSnapshot.kills;
+  const dDeaths = deathCount - roomStatsSnapshot.deaths;
+  const dPoints = curPoints - roomStatsSnapshot.points;
+  if(dKills<=0 && dDeaths<=0 && dPoints<=0) return;
+  roomStatsSnapshot = { kills, points: curPoints, deaths: deathCount };
+  try{
+    await sb.rpc("room_bump_stats", {
+      p_room: roomCode, p_player_id: myPlayerId, p_name: playerName,
+      p_dkills: Math.max(0,dKills), p_ddeaths: Math.max(0,dDeaths), p_dpoints: Math.max(0,dPoints),
+    });
+  }catch(e){ console.warn("room stat flush failed", e); }
+}
+
+// fetches and renders the end-of-room recap: per-player kills/deaths/points, plus which bosses fell.
+async function showRoomSummary(forRoomCode, note){
+  running = false;
+  document.getElementById("hud").classList.add("hidden");
+  document.getElementById("skillbar").classList.add("hidden");
+  document.getElementById("exitBtn").classList.add("hidden");
+  document.getElementById("exitModal").classList.add("hidden");
+  document.getElementById("results").classList.add("hidden");
+  document.getElementById("menu").classList.add("hidden");
+  document.getElementById("roomSummaryModal").classList.remove("hidden");
+  document.getElementById("roomSummarySub").textContent = note || ("Room \""+forRoomCode+"\" sudah berakhir.");
+  document.getElementById("roomSummaryBosses").innerHTML = "Memuat rekap…";
+  document.getElementById("roomSummaryPlayers").innerHTML = "";
+  if(!sb) return;
+  try{
+    const [{ data: roomRow }, { data: players, error: pErr }] = await Promise.all([
+      sb.from("bladewar_rooms").select("bosses_defeated").eq("room_code", forRoomCode).maybeSingle(),
+      sb.from("bladewar_room_players").select("name,kills,deaths,points").eq("room_code", forRoomCode).order("points",{ascending:false}),
+    ]);
+    if(pErr) throw pErr;
+    const bosses = (roomRow && roomRow.bosses_defeated) || [];
+    document.getElementById("roomSummaryBosses").innerHTML = bosses.length
+      ? "<b>Boss ditumbangkan:</b> " + bosses.map(b=>escapeHtml(b.name)).join(", ")
+      : "<span style=\"color:var(--text-dim)\">Belum ada boss yang tumbang di room ini.</span>";
+    document.getElementById("roomSummaryPlayers").innerHTML = (players||[]).map(p=>
+      `<div class="roster-row"><span>${escapeHtml(p.name)}</span><span>Kill ${p.kills} · Mati ${p.deaths} · <b>${p.points} pt</b></span></div>`
+    ).join("") || "<div class=\"lb-empty\">Belum ada data pemain.</div>";
+  }catch(e){
+    console.warn("load room summary failed", e);
+    document.getElementById("roomSummaryBosses").innerHTML = "";
+    document.getElementById("roomSummaryPlayers").innerHTML = "<div class=\"lb-empty\">Gagal memuat rekap.</div>";
+  }
 }
 
 function setConn(ok, text){
@@ -1740,6 +1899,10 @@ function loop(t){
     broadcastState();
     checkPvpHits();
     pruneRemotePlayers();
+    if(roomIsActive){
+      const nowMs = performance.now();
+      if(nowMs - lastRoomFlush > ROOM_FLUSH_INTERVAL){ lastRoomFlush = nowMs; flushRoomStats(); }
+    }
   }
   updatePickups();
   updateSkillPickups();
@@ -2075,6 +2238,7 @@ function updateHUD(){
   if(mode==="multiplayer"){
     const rosterBox = document.getElementById("roster");
     rosterBox.classList.remove("hidden");
+    document.getElementById("chatBox").classList.remove("hidden");
     const list = [{name:playerName+" (kamu)", level:player.level, pvp:pvpMode}];
     for(const [id,rp] of remotePlayers) list.push({name:rp.name||"?", level:rp.level||1, pvp: rp.pvp!==false});
     list.sort((a,b)=>b.level-a.level);
@@ -2083,6 +2247,7 @@ function updateHUD(){
     ).join("");
   } else {
     document.getElementById("roster").classList.add("hidden");
+    document.getElementById("chatBox").classList.add("hidden");
   }
 
   updateSkillBarUI();
@@ -2199,6 +2364,9 @@ function startGame(selMode){
   Object.keys(state).forEach(k=>delete state[k]);
   elapsed = 0; kills = 0; spawnTimer = 0; resultsShown = false; nextBossAt = BOSS_FIRST_AT; announcedWave = 1;
   remotePlayers.clear();
+  roomIsActive = false; roomIsCreator = false; roomEnded = false; deathCount = 0;
+  roomStatsSnapshot = { kills:0, points:0, deaths:0 }; lastRoomFlush = 0;
+  document.getElementById("chatLog").innerHTML = "";
 
   document.getElementById("menu").classList.add("hidden");
   document.getElementById("results").classList.add("hidden");
@@ -2218,8 +2386,11 @@ function onPlayerDeath(){
   running = false;
   resultsShown = true;
   playDeath();
-  if(mode==="multiplayer" && channel){
-    channel.send({type:"broadcast", event:"death", payload:{id:myId}});
+  // multiplayer no longer auto-disconnects on death — the shared room (boss, timer, other players)
+  // keeps running regardless; "Main Lagi" respawns in place, "Kembali ke Menu" is the real exit.
+  if(mode==="multiplayer"){
+    deathCount++;
+    if(roomIsActive) flushRoomStats(); // report the death right away instead of waiting for the periodic tick
   }
   document.getElementById("resTitle").textContent = mode==="survival"? "Kamu Tumbang!" : "Kamu Kalah!";
   document.getElementById("resTime").textContent = fmtTime(elapsed);
@@ -2228,10 +2399,10 @@ function onPlayerDeath(){
   document.getElementById("resPoints").textContent = computePoints(player.level, kills, Math.floor(elapsed));
   document.getElementById("scoreStatus").textContent = "";
   document.getElementById("results").classList.remove("hidden");
+  document.getElementById("btnRespawnRoom").classList.toggle("hidden", mode!=="multiplayer");
   document.getElementById("hud").classList.add("hidden");
   document.getElementById("skillbar").classList.add("hidden");
   document.getElementById("exitBtn").classList.add("hidden");
-  if(mode==="multiplayer") disconnectMultiplayer();
   if(mode==="survival") submitScore(); // auto-kirim skor, progress tertinggi per player_id yang kesimpen
 }
 
@@ -2249,6 +2420,7 @@ function exitToMenu(){
 document.getElementById("exitBtn").addEventListener("click", ()=>{
   if(!running) return; // already dead/paused
   running = false; // pause the loop in place
+  document.getElementById("roomControls").classList.toggle("hidden", !(mode==="multiplayer" && roomIsActive && roomIsCreator && !roomEnded));
   document.getElementById("exitModal").classList.remove("hidden");
 });
 document.getElementById("btnResumeGame").addEventListener("click", ()=>{
@@ -2264,9 +2436,70 @@ document.getElementById("btnConfirmExit").addEventListener("click", async (e)=>{
     await submitScore(); // simpan progress sebelum keluar
     btn.disabled = false; btn.textContent = "Simpan & Keluar";
   }
+  if(mode==="multiplayer" && roomIsActive) await flushRoomStats(); // jangan sampai beberapa detik terakhir hilang
   document.getElementById("exitModal").classList.add("hidden");
   if(mode==="multiplayer") disconnectMultiplayer();
   exitToMenu();
+});
+document.getElementById("btnEndRoom").addEventListener("click", async (e)=>{
+  const btn = e.currentTarget;
+  if(!sb || !roomIsActive || !roomIsCreator || roomEnded) return;
+  btn.disabled = true; btn.textContent = "Mengakhiri…";
+  try{
+    const { data, error } = await sb.rpc("room_end", { p_room: roomCode, p_player_id: myPlayerId });
+    if(error) throw error;
+    if(data && data.ok){
+      roomEnded = true;
+      if(channel) channel.send({type:"broadcast", event:"roomEnded", payload:{ room: roomCode }});
+      await submitScore(); // fold this room's result into the survival leaderboard too
+      document.getElementById("exitModal").classList.add("hidden");
+      showRoomSummary(roomCode, "Kamu mengakhiri room ini.");
+    }
+  }catch(e){
+    console.warn("end room failed", e);
+  }
+  btn.disabled = false; btn.textContent = "🏁 Akhiri Room";
+});
+document.getElementById("btnRespawnRoom").addEventListener("click", ()=>{
+  document.getElementById("results").classList.add("hidden");
+  document.getElementById("hud").classList.remove("hidden");
+  document.getElementById("skillbar").classList.remove("hidden");
+  document.getElementById("exitBtn").classList.remove("hidden");
+  // only the local player object resets — elapsed/kills/creeps/boss/room all keep going untouched,
+  // so this really is "die and get back up", not a fresh game
+  player = newPlayer();
+  player.x = clamp(rand(0,world.w), 80, world.w-80);
+  player.y = clamp(rand(0,world.h), 80, world.h-80);
+  resultsShown = false;
+  showBanner("Kamu respawn — room tetap jalan!");
+  running = true; lastT = 0;
+  requestAnimationFrame(loop);
+});
+document.getElementById("btnCloseRoomSummary").addEventListener("click", ()=>{
+  document.getElementById("roomSummaryModal").classList.add("hidden");
+  if(mode==="multiplayer") disconnectMultiplayer();
+  exitToMenu();
+});
+
+/* ================= CHAT (multiplayer only, session-only, nothing persisted) ================= */
+const CHAT_MAX_LINES = 30;
+function addChatLine(name, text, isMe){
+  const log = document.getElementById("chatLog");
+  const line = document.createElement("div");
+  line.className = "chat-line" + (isMe? " me" : "");
+  line.innerHTML = `<b>${escapeHtml(name)}:</b> ${escapeHtml(text)}`;
+  log.appendChild(line);
+  while(log.children.length > CHAT_MAX_LINES) log.removeChild(log.firstChild);
+  log.scrollTop = log.scrollHeight;
+}
+document.getElementById("chatForm").addEventListener("submit", (e)=>{
+  e.preventDefault();
+  const input = document.getElementById("chatInput");
+  const text = input.value.trim().slice(0,80);
+  input.value = "";
+  if(!text || mode!=="multiplayer" || !channel) return;
+  addChatLine(playerName+" (kamu)", text, true); // broadcast self:false — show our own line locally right away
+  channel.send({type:"broadcast", event:"chat", payload:{ name:playerName, text }});
 });
 
 /* ================= MENU GALLERIES (always visible on the main menu now) ================= */
@@ -2332,7 +2565,10 @@ document.getElementById("btnModeCoop").addEventListener("click", ()=>{
 
 document.getElementById("btnSurvival").addEventListener("click", ()=>startGame("survival"));
 document.getElementById("btnMulti").addEventListener("click", ()=>startGame("multiplayer"));
-document.getElementById("btnBackMenu").addEventListener("click", exitToMenu);
+document.getElementById("btnBackMenu").addEventListener("click", ()=>{
+  if(mode==="multiplayer") disconnectMultiplayer();
+  exitToMenu();
+});
 
 async function submitScore(){
   const statusEl = document.getElementById("scoreStatus");
