@@ -33,7 +33,7 @@
   .hidden{ display:none !important; }
 
   /* ---------- Menu ---------- */
-  #menu{
+  .app-screen{
     position:absolute; inset:0; overflow-y:auto; z-index: 10;
     background: radial-gradient(ellipse at 50% 30%, #1a1f33 0%, #05060a 100%);
   }
@@ -58,11 +58,11 @@
   .title::before{ content:"⚔ "; -webkit-text-fill-color:#ffa94d; }
   .subtitle{ text-align:center; color: var(--text-dim); font-size: 13px; margin-bottom: 22px; }
   label{ font-size: 12px; color: var(--text-dim); display:block; margin: 14px 0 6px; }
-  input[type=text]{
+  input[type=text], input[type=email], input[type=password]{
     width:100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #333955;
     background: #0f111c; color: var(--text); font-size: 14px; outline: none;
   }
-  input[type=text]:focus{ border-color: var(--accent-2); }
+  input[type=text]:focus, input[type=email]:focus, input[type=password]:focus{ border-color: var(--accent-2); }
   .btn{
     width:100%; padding: 12px 14px; border-radius: 10px; border: none; cursor:pointer;
     font-size: 15px; font-weight: 700; margin-top: 12px; transition: transform .1s, filter .15s;
@@ -95,6 +95,19 @@
   .lb-row{ display:flex; justify-content:space-between; font-size: 13px; padding: 6px 0; color: var(--text); }
   .lb-row span:first-child{ color: var(--text-dim); width: 24px; display:inline-block;}
   .lb-empty{ font-size:12px; color:var(--text-dim); }
+  .room-row{
+    display:flex; justify-content:space-between; align-items:center; font-size:13px; padding:10px 12px;
+    margin-bottom:8px; border-radius:10px; background:#171a2b; border:1px solid #262b45; cursor:pointer;
+  }
+  .room-row:hover{ border-color:var(--accent-2); background:#1d2138; }
+  .room-row .room-meta{ font-size:11px; color:var(--text-dim); }
+  .panel-title-row{ display:flex; justify-content:space-between; align-items:center; }
+  .icon-btn{
+    background:none; border:1px solid #333955; border-radius:8px; color:var(--text-dim);
+    font-size:13px; padding:2px 8px; cursor:pointer; font-family:inherit;
+  }
+  .icon-btn:hover{ color:var(--text); border-color:var(--accent-2); }
+  .auth-field{ display:flex; flex-direction:column; }
 
   /* ---------- HUD ---------- */
   #hud{ position:absolute; inset:0; pointer-events:none; z-index:5; }
@@ -145,14 +158,14 @@
   #bossbar-fill{ height:100%; background: linear-gradient(90deg,#8b0000,#ff2d4d); width:100%; transition:width .15s; }
 
   #minimap-box{
-    position:absolute; left:14px; bottom:14px; width:140px; height:140px;
+    position:absolute; left:14px; bottom:64px; width:140px; height:140px;
     background: rgba(15,17,28,0.68); border:1px solid #2b3050; border-radius:10px;
     padding:4px; box-shadow: 0 4px 16px rgba(0,0,0,0.4);
   }
   #minimap{ display:block; width:100%; height:100%; border-radius:6px; }
 
   #chatBox{
-    position:absolute; right:14px; bottom:14px; width:220px; pointer-events:auto;
+    position:absolute; left:50%; bottom:14px; width:260px; transform:translateX(-50%); pointer-events:auto;
     background: rgba(15,17,28,0.72); border:1px solid #2b3050; border-radius:10px;
     padding:8px; box-shadow: 0 4px 16px rgba(0,0,0,0.4); display:flex; flex-direction:column; gap:6px;
   }
@@ -224,7 +237,7 @@
   .gitem-body p{ margin:0; font-size:11.5px; color:#c3c7db; line-height:1.35; }
 
   #connstatus{
-    position:absolute; bottom:14px; left:14px; font-size:11px; color: var(--text-dim);
+    position:absolute; bottom:214px; left:14px; font-size:11px; color: var(--text-dim);
     background: rgba(15,17,28,0.6); padding:5px 10px; border-radius:8px; border:1px solid #2b3050;
   }
   .dot{ display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:5px; background:#666; }
@@ -233,7 +246,7 @@
 
   /* ---------- Exit ---------- */
   #exitBtn{
-    position:absolute; top:14px; left:50%; transform:translateX(-50%); z-index:7;
+    position:absolute; left:14px; bottom:14px; z-index:7;
     background: rgba(15,17,28,0.7); border:1px solid #2b3050; border-radius:10px;
     padding:9px 16px; font-size:12px; font-weight:700; color:var(--text-dim); cursor:pointer;
     font-family:inherit;
@@ -252,67 +265,140 @@
 
 <canvas id="game"></canvas>
 
-<div id="menu">
-  <svg class="poster-bg" viewBox="0 0 800 800" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-    <defs>
-      <linearGradient id="swordGrad" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0" stop-color="#ffd43b"/>
-        <stop offset="0.5" stop-color="#ff9b4d"/>
-        <stop offset="1" stop-color="#ff5b5b"/>
-      </linearGradient>
-      <radialGradient id="posterGlow" cx="50%" cy="38%" r="60%">
-        <stop offset="0" stop-color="#3a2550" stop-opacity="0.55"/>
-        <stop offset="1" stop-color="#05060a" stop-opacity="0"/>
-      </radialGradient>
-    </defs>
-    <rect width="800" height="800" fill="url(#posterGlow)"/>
-    <g transform="translate(400,380)" opacity="0.15">
-      <g transform="rotate(45)"><path d="M0,-320 L26,-110 L26,-46 L58,-46 L58,-14 L20,-14 L20,230 L34,258 L0,300 L-34,258 L-20,230 L-20,-14 L-58,-14 L-58,-46 L-26,-46 L-26,-110 Z" fill="url(#swordGrad)"/></g>
-      <g transform="rotate(-45)"><path d="M0,-320 L26,-110 L26,-46 L58,-46 L58,-14 L20,-14 L20,230 L34,258 L0,300 L-34,258 L-20,230 L-20,-14 L-58,-14 L-58,-46 L-26,-46 L-26,-110 Z" fill="url(#swordGrad)"/></g>
-    </g>
-  </svg>
+<svg style="display:none;">
+  <defs id="posterDefs">
+    <linearGradient id="swordGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd43b"/>
+      <stop offset="0.5" stop-color="#ff9b4d"/>
+      <stop offset="1" stop-color="#ff5b5b"/>
+    </linearGradient>
+    <radialGradient id="posterGlow" cx="50%" cy="38%" r="60%">
+      <stop offset="0" stop-color="#3a2550" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#05060a" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+</svg>
 
+<template id="posterBgTpl"><svg class="poster-bg" viewBox="0 0 800 800" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+  <rect width="800" height="800" fill="url(#posterGlow)"/>
+  <g transform="translate(400,380)" opacity="0.15">
+    <g transform="rotate(45)"><path d="M0,-320 L26,-110 L26,-46 L58,-46 L58,-14 L20,-14 L20,230 L34,258 L0,300 L-34,258 L-20,230 L-20,-14 L-58,-14 L-58,-46 L-26,-46 L-26,-110 Z" fill="url(#swordGrad)"/></g>
+    <g transform="rotate(-45)"><path d="M0,-320 L26,-110 L26,-46 L58,-46 L58,-14 L20,-14 L20,230 L34,258 L0,300 L-34,258 L-20,230 L-20,-14 L-58,-14 L-58,-46 L-26,-46 L-26,-110 Z" fill="url(#swordGrad)"/></g>
+  </g>
+</svg></template>
+
+<!-- ================= SCREEN 1: login / signup / guest ================= -->
+<div id="authScreen" class="app-screen">
   <div class="menu-wrap">
     <div class="menu-card">
       <div class="title">BLADEWAR</div>
-      <div class="subtitle">Kumpulin pedang, spin, bantai musuh.</div>
-
-      <label for="nameInput">Nama Kamu</label>
-      <input type="text" id="nameInput" maxlength="14" placeholder="Player">
-
-      <button class="btn btn-survival" id="btnSurvival">⚔ Survival (Single Player)</button>
-
-      <label for="roomInput" style="margin-top:18px;">Kode Room Multiplayer</label>
-      <div class="row">
-        <input type="text" id="roomInput" maxlength="16" placeholder="public" value="public">
+      <div class="subtitle">Masuk buat nyimpen progress &amp; muncul di leaderboard, atau langsung main sebagai tamu.</div>
+      <div class="mode-toggle">
+        <button type="button" class="mode-btn active" id="tabLogin">Masuk</button>
+        <button type="button" class="mode-btn" id="tabSignup">Buat Akun</button>
       </div>
-      <label style="margin-top:14px;">Mode Multiplayer</label>
+      <form id="authForm">
+        <div class="auth-field hidden" id="authNameField">
+          <label>Nama Pemain</label>
+          <input type="text" id="authName" maxlength="14" placeholder="Nama kamu">
+        </div>
+        <div class="auth-field">
+          <label>Email</label>
+          <input type="email" id="authEmail" required placeholder="email@contoh.com">
+        </div>
+        <div class="auth-field">
+          <label>Password</label>
+          <input type="password" id="authPassword" required minlength="6" placeholder="Minimal 6 karakter">
+        </div>
+        <button type="submit" class="btn btn-mp" id="btnAuthSubmit">Masuk</button>
+      </form>
+      <div id="authStatus" style="text-align:center; font-size:12px; color:var(--text-dim); margin-top:10px; min-height:16px;"></div>
+      <div style="display:flex; align-items:center; gap:10px; margin:16px 0;">
+        <div style="flex:1;height:1px;background:#2b3050;"></div>
+        <span style="font-size:11px;color:var(--text-dim);">atau</span>
+        <div style="flex:1;height:1px;background:#2b3050;"></div>
+      </div>
+      <div class="auth-field">
+        <label>Main sebagai Tamu (tanpa akun)</label>
+        <input type="text" id="guestNameInput" maxlength="14" placeholder="Nama kamu (opsional)">
+      </div>
+      <button type="button" class="btn btn-secondary" id="btnGuestPlay">▶ Main sebagai Tamu</button>
+    </div>
+    <div class="menu-col">
+      <div class="side-panel">
+        <h3>Musuh</h3>
+        <div id="enemyGallery" class="panel-body"></div>
+      </div>
+    </div>
+    <div class="menu-col">
+      <div class="side-panel" style="margin-bottom:18px;">
+        <h3>Pedang</h3>
+        <div id="swordGallery" class="panel-body"></div>
+      </div>
+      <div class="side-panel">
+        <h3>Skill</h3>
+        <div id="skillGallery" class="panel-body"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SCREEN 2: profile (name, match history, leaderboard) ================= -->
+<div id="profileScreen" class="app-screen hidden">
+  <div class="menu-wrap" style="justify-content:center;">
+    <div class="menu-card">
+      <div class="title">BLADEWAR</div>
+      <div class="subtitle" id="profileName">Player</div>
+      <div class="sub" id="profileEmail" style="text-align:center; color:var(--text-dim); font-size:12px; margin-top:-16px; margin-bottom:14px;"></div>
+      <button class="btn btn-mp" id="btnGoModeSelect">▶ Main</button>
+      <button class="btn btn-secondary" id="btnLogout">Keluar Akun</button>
+    </div>
+    <div class="menu-col">
+      <div class="side-panel">
+        <h3>Riwayat Main</h3>
+        <div id="matchHistoryList" class="panel-body"><div class="lb-empty">Memuat…</div></div>
+      </div>
+    </div>
+    <div class="menu-col">
+      <div id="leaderboard">
+        <h3>Top Survival</h3>
+        <div id="lbList" class="panel-body"><div class="lb-empty">Memuat…</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SCREEN 3: mode select ================= -->
+<div id="modeSelect" class="app-screen hidden">
+  <div class="menu-wrap" style="justify-content:center;">
+    <div class="menu-card">
+      <div class="title">BLADEWAR</div>
+      <div class="subtitle" id="modeSelectGreeting">Halo!</div>
+      <button class="btn btn-survival" id="btnGoSurvival">⚔ Survival (Single Player)</button>
+      <button class="btn btn-mp" id="btnGoMultiplayer">🌐 Multiplayer</button>
+      <button class="btn btn-secondary" id="btnBackFromModeSelect">◀ Kembali</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SCREEN 4: multiplayer room browser ================= -->
+<div id="roomBrowser" class="app-screen hidden">
+  <div class="menu-wrap" style="justify-content:center;">
+    <div class="menu-card">
+      <div class="title">Multiplayer</div>
+      <div class="subtitle">Gabung room yang lagi aktif, atau bikin baru — semua pemain di room yang sama lihat musuh &amp; powerup yang identik.</div>
+      <label>Mode Kamu</label>
       <div class="mode-toggle">
         <button type="button" class="mode-btn active" id="btnModeVersus">⚔ Saling Lawan</button>
         <button type="button" class="mode-btn" id="btnModeCoop">🤝 Berteman</button>
       </div>
-      <button class="btn btn-mp" id="btnMulti">🌐 Masuk Multiplayer</button>
+      <button class="btn btn-mp" id="btnCreateRoom" style="margin-top:14px;">➕ Buat Room Baru</button>
+      <button class="btn btn-secondary" id="btnBackFromRoomBrowser">◀ Kembali</button>
     </div>
-
-    <div class="menu-col">
-      <div class="side-panel">
-        <h3>Galeri Musuh</h3>
-        <div id="enemyGallery" class="panel-body"></div>
-      </div>
-      <div class="side-panel">
-        <h3>Galeri Skill</h3>
-        <div id="skillGallery" class="panel-body"></div>
-      </div>
-    </div>
-
-    <div class="menu-col">
-      <div class="side-panel">
-        <h3>Galeri Senjata</h3>
-        <div id="swordGallery" class="panel-body"></div>
-      </div>
-      <div id="leaderboard">
-        <h3>Top Survival</h3>
-        <div id="lbList" class="panel-body"><div class="lb-empty">Memuat…</div></div>
+    <div class="menu-col" style="flex:1.3 1 340px; max-width:460px;">
+      <div class="side-panel" style="max-height:none;">
+        <div class="panel-title-row"><h3 style="margin:0;">Room Aktif</h3><button type="button" class="icon-btn" id="btnRefreshRooms">⟳ Refresh</button></div>
+        <div id="roomList" class="panel-body" style="max-height:420px; margin-top:10px;"><div class="lb-empty">Memuat…</div></div>
       </div>
     </div>
   </div>
@@ -411,14 +497,31 @@
 "use strict";
 
 /* ================= CONFIG ================= */
-const SUPABASE_URL = "https://mlsibwihfzehqcdawrdh.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1sc2lid2loZnplaHFjZGF3cmRoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgxMTcwNTEsImV4cCI6MjEwMzY5MzA1MX0.faKWNZqTLE6nEH6nPw0L4uFepTy6ZvqrZDy2BaHcWxs";
+// Project Supabase yang sama dengan game lain (mis. Mancing Mania) — kita cuma numpang tabel
+// auth.users-nya (login/akun sama), tapi SEMUA tabel Bladewar di bawah punya nama sendiri
+// (akhiran _bladewar) jadi nggak nyenggol tabel game lain sama sekali.
+const SUPABASE_URL = "https://riugacrmejboxnpcawpd.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJpdWdhY3JtZWpib3hucGNhd3BkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgwNDI1ODYsImV4cCI6MjEwMzYxODU4Nn0.hh5xE1FGm8uqiunj9dkSnU-7Sai7g6hIepq_9Iar6LA";
 let sb = null;
 try{
   if (window.supabase && window.supabase.createClient){
     sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   }
 }catch(e){ console.warn("Supabase init failed", e); }
+
+// stamp the reusable poster-background art (sword logo glow) onto every full-screen panel
+document.querySelectorAll(".app-screen").forEach(scr=>{
+  const tpl = document.getElementById("posterBgTpl");
+  if(tpl) scr.insertAdjacentHTML("afterbegin", tpl.innerHTML);
+});
+
+/* ================= AUTH / SESSION ================= */
+// authUser: null while logged out/guest, else { id, email, name } from Supabase Auth.
+// Kalau login: identitas dipakai buat leaderboard/room adalah authUser.id (uuid Supabase Auth).
+// Kalau tamu: tetap pakai getPersistentPlayerId() lokal seperti sebelumnya, authUser tetap null.
+let authUser = null;
+let authMode = "login"; // "login" | "signup" — toggled by the tab buttons
+let isGuest = false;
 
 const SWORD_TIERS = [
   { key:"common",    label:"Common",        color:"#c7ccd8", dmg:3,  weight:48, lifesteal:0,
@@ -672,7 +775,10 @@ function getPersistentPlayerId(){
     return "session-"+myId; // localStorage unavailable (e.g. private mode) — falls back to per-session id
   }
 }
-const myPlayerId = getPersistentPlayerId();
+// persistent identity used for leaderboard/room rows: a logged-in account uses its Supabase Auth
+// uuid (so progress follows the account across devices); a guest keeps the old local-device id.
+// Starts as the guest id and gets swapped to authUser.id once login/session-restore resolves.
+let myPlayerId = getPersistentPlayerId();
 
 let player = null;
 let creeps = [];
@@ -979,6 +1085,8 @@ function updateSkillPickups(){
 
 /* ---------- Blade Pack pickups (rare, adds several blades at once) ---------- */
 function spawnBladePackAmbient(dt){
+  // host-authoritative in multiplayer, same reasoning as skill orbs — see spawnSkillOrbsAmbient
+  if(mode==="multiplayer" && !isHost()) return;
   state.bladePackTimer = (state.bladePackTimer||rand(30,45)) - dt;
   if(state.bladePackTimer<=0){
     state.bladePackTimer = rand(50,80);
@@ -1001,6 +1109,12 @@ function updateBladePackPickups(){
       showBanner("⚔ +"+bp.pack.amount+" BLADE PACK!");
       playPickup();
       bladePacks.splice(i,1);
+      // tell the host so it drops this pack from the authoritative list too — otherwise it'd
+      // reappear for everyone else on the next world snapshot (the host doesn't know it's gone yet)
+      if(mode==="multiplayer" && !isHost()){
+        markJustTaken(bp.id);
+        if(channel) channel.send({type:"broadcast", event:"itemTaken", payload:{kind:"bladePack", id:bp.id}});
+      }
     }
   }
 }
@@ -1110,14 +1224,19 @@ function spawnCreep(){
 }
 
 const MAX_CREEPS = 120;
+const MAX_CREEPS_MP = 40; // multiplayer keeps a smaller shared cap — cheaper to broadcast, and every player sees the exact same set
 const CREEP_DESPAWN_RADIUS = 2200; // recycle creeps left far behind so the simulation never grows unbounded during endless play
 let spawnTimer = 0;
 function updateCreepSpawning(dt){
+  // multiplayer: only the host spawns real creeps — everyone else just mirrors the host's list
+  // (see applyWorldSnapshot), same host-authoritative pattern already used for the boss/skill orbs.
+  if(mode==="multiplayer" && !isHost()) return;
+  const cap = mode==="multiplayer" ? MAX_CREEPS_MP : MAX_CREEPS;
   const interval = clamp(2.2 - elapsed/60, 0.35, 2.2);
   spawnTimer -= dt;
   if(spawnTimer <= 0){
     spawnTimer = interval;
-    if(creeps.length < MAX_CREEPS) spawnCreep();
+    if(creeps.length < cap) spawnCreep();
   }
 }
 
@@ -1256,14 +1375,15 @@ function updateBossPassives(dt){
   }
 }
 
-// eases a networked boss mirror's position toward the host's latest broadcast, same trick used for
-// remote players — and drops the mirror if the host goes quiet for a while (disconnect/migration),
-// so a "ghost boss" can never linger forever, invulnerable, after its real owner is gone
+// eases a networked mirror's position toward the host's latest broadcast, same trick used for
+// remote players — covers both the boss mirror (netBoss) and every ordinary mirrored creep
+// (netMirror) — and drops the mirror if the host goes quiet for a while (disconnect/migration),
+// so a "ghost" enemy can never linger forever, invulnerable, after its real owner is gone
 function updateNetBossInterp(dt){
   const smooth = 1 - Math.exp(-10*dt);
   const now = performance.now();
   for(const c of creeps){
-    if(!c.netBoss || c.hp<=0) continue;
+    if((!c.netBoss && !c.netMirror) || c.hp<=0) continue;
     if(now - (c.lastNetSync||now) > 6000){ c.hp = 0; continue; }
     if(c.targetX!=null){
       c.x += (c.targetX-c.x)*smooth;
@@ -1298,9 +1418,62 @@ function clearNetBoss(){
   for(const c of creeps){ if(c.boss && c.netBoss) c.hp = 0; }
 }
 
-// central choke point for all boss damage: blocks it during a shield window, and — for a guest's
-// networked boss mirror — forwards it to the host (who owns the real hp) instead of mutating locally.
-// Returns true if the hit should show normal damage feedback, false if it was blocked.
+// ---- generalized world sync: every ordinary creep, ground sword pickup & blade pack ----
+// Host is the sole spawner/simulator for all of these in multiplayer (see the isHost() gates on
+// updateCreepSpawning/spawnPickupsAmbient/spawnBladePackAmbient); it piggybacks a compact snapshot
+// of all three on its regular state broadcast (see broadcastState), and every other client mirrors
+// that snapshot here instead of running its own independent copy — so "musuh dan powerup yang
+// dilihat 1 pemain sama persis dengan pemain lainnya" holds for the whole shared world, not just
+// the boss/skill-orbs like before.
+const justTakenIds = new Set();
+function markJustTaken(id){
+  justTakenIds.add(id);
+  setTimeout(()=>justTakenIds.delete(id), 2000); // grace window so the item doesn't flicker back in before the host's own list catches up
+}
+function applyMirrorList(localArr, hostList, build){
+  if(!hostList) return;
+  const ids = new Set(hostList.map(e=>e.id));
+  for(let i=localArr.length-1;i>=0;i--){ if(!ids.has(localArr[i].id)) localArr.splice(i,1); }
+  for(const e of hostList){
+    if(justTakenIds.has(e.id)) continue;
+    if(!localArr.some(x=>x.id===e.id)) localArr.push(build(e));
+  }
+}
+function applyWorldSnapshot(w){
+  const now = performance.now();
+  const seen = new Set();
+  for(const e of (w.creeps||[])){
+    seen.add(e.id);
+    let c = creeps.find(cc=>cc.netMirror && cc.netId===e.id);
+    if(!c){
+      c = {
+        id: uid(), netId: e.id, netMirror: true,
+        x:e.x, y:e.y, targetX:e.x, targetY:e.y,
+        radius:e.r, hp:e.hp, maxHp:e.maxHp, dmg:e.dmg, speed:e.spd, expValue:e.xp,
+        brute: !!e.b, swordsman: !!e.s, boss:false, spinAngle: e.sp||0,
+        swords: e.sw ? Array.from({length:e.sw}, ()=>({color:"#c58bff"})) : [],
+        lastNetSync: now, hitTimers:{}, lastTouch:-9999,
+      };
+      creeps.push(c);
+    } else {
+      c.targetX = e.x; c.targetY = e.y; c.hp = e.hp; c.maxHp = e.maxHp;
+      c.dmg = e.dmg; c.speed = e.spd; c.spinAngle = e.sp!=null? e.sp : c.spinAngle;
+      if(e.sw!=null && (!c.swords || c.swords.length!==e.sw)){
+        c.swords = Array.from({length:e.sw}, ()=>({color:"#c58bff"}));
+      }
+      c.lastNetSync = now;
+    }
+  }
+  for(const c of creeps){ if(c.netMirror && !seen.has(c.netId)) c.hp = 0; }
+
+  applyMirrorList(pickups, w.pk, (e)=>({ x:e.x, y:e.y, tier:tierByKey(e.t)||SWORD_TIERS[0], id:e.id }));
+  applyMirrorList(bladePacks, w.bp, (e)=>({ x:e.x, y:e.y, pack: BLADE_PACKS[e.k]||BLADE_PACKS[0], id:e.id }));
+}
+
+// central choke point for all creep damage: blocks it during a boss shield window, and — for any
+// networked mirror (boss or ordinary creep) — forwards it to the host (who owns the real hp)
+// instead of mutating locally. Returns true if the hit should show normal damage feedback, false
+// if it was blocked.
 function applyDamageToCreep(c, dmg){
   if(c.boss && c.shieldActive){
     spawnFloater(c.x, c.y-c.radius-6, "🛡️ Diblokir!", "#8be9ff");
@@ -1308,6 +1481,10 @@ function applyDamageToCreep(c, dmg){
   }
   if(c.boss && c.netBoss){
     if(channel) channel.send({type:"broadcast", event:"bossHit", payload:{ netId:c.netId, dmg, fromId:myId }});
+    return true;
+  }
+  if(c.netMirror){
+    if(channel) channel.send({type:"broadcast", event:"creepHit", payload:{ netId:c.netId, dmg, fromId:myId }});
     return true;
   }
   c.hp -= dmg;
@@ -1322,7 +1499,7 @@ function updateCreeps(dt){
     if(c.hp<=0) continue;
     if(c.knockUntil && now0 < c.knockUntil) continue; // reeling from a knockback — AI stands down briefly
 
-    if(c.swordsman){
+    if(c.swordsman && !c.netMirror){
       c.spinAngle = (c.spinAngle||0) + creepSpinSpeed(c)*dt;
 
       const dPlayer = Math.hypot(player.x-c.x, player.y-c.y);
@@ -1366,6 +1543,13 @@ function updateCreeps(dt){
       // a networked boss mirror: position comes from the host via updateNetBossInterp(), not local chase AI
       if(d < c.radius + player.radius){
         tryDamagePlayer(player, c.dmg*(c._enrageDmgMult||1), c);
+      }
+      continue;
+    }
+    if(c.netMirror){
+      // a networked ordinary-creep mirror: position comes from the host via updateNetBossInterp(), just handle contact damage
+      if(d < c.radius + player.radius){
+        tryDamagePlayer(player, c.dmg, c);
       }
       continue;
     }
@@ -1504,10 +1688,23 @@ function resolveClash(pOwner, pIdx, cOwner, cIdx){
   if(playerLoses) showBanner("💥 Bladamu kalah beradu, satu pecah!");
 }
 
-function killCreep(c){
+// killerId: who actually landed the finishing blow (defaults to "me" — the normal case, since
+// applyDamageToCreep only ever calls killCreep locally for creeps I own outright: my own real
+// creeps in survival, or my own real creeps in multiplayer if I'm the host). It only differs from
+// myId when the host is processing a "creepHit"/"bossHit" relay on behalf of some other client.
+// Boss keeps the old "everyone gets credit" behavior (bossDeath below); ordinary creeps instead give
+// credit ONLY to the actual killer, so a crowd of players farming the same shared field doesn't all
+// get free exp for kills they didn't make.
+function killCreep(c, killerId){
+  if(killerId===undefined) killerId = myId;
   c.hp = 0;
-  gainExp(player, c.expValue, c.x, c.y);
-  kills++;
+  if(mode==="multiplayer" && !c.boss){
+    if(killerId===myId){ gainExp(player, c.expValue, c.x, c.y); kills++; }
+    else if(channel){ channel.send({type:"broadcast", event:"killCredit", payload:{ killerId, expValue:c.expValue, x:c.x, y:c.y }}); }
+  } else {
+    gainExp(player, c.expValue, c.x, c.y);
+    kills++;
+  }
   if(c.boss){
     showBanner("💀 "+c.name+" TUMBANG!");
     playBossDeath();
@@ -1522,7 +1719,7 @@ function killCreep(c){
     if(mode==="multiplayer" && channel && !c.netBoss){
       channel.send({type:"broadcast", event:"bossDeath", payload:{ netId:c.id, x:c.x, y:c.y, name:c.name, expValue:c.expValue }});
       if(roomIsActive && sb){
-        sb.rpc("room_add_boss", { p_room: roomCode, p_boss_name: c.name }).catch(e=>console.warn("room_add_boss failed", e));
+        sb.rpc("room_add_boss_bladewar", { p_room: roomCode, p_boss_name: c.name }).catch(e=>console.warn("room_add_boss failed", e));
       }
     }
     return;
@@ -1564,6 +1761,8 @@ function tryDamagePlayer(p, dmg, source){
 
 /* ---------- Pickups ---------- */
 function spawnPickupsAmbient(dt){
+  // host-authoritative in multiplayer — see spawnSkillOrbsAmbient for why
+  if(mode==="multiplayer" && !isHost()) return;
   state.pickupTimer = (state.pickupTimer||0) - dt;
   if(state.pickupTimer<=0){
     state.pickupTimer = rand(2.5,4.5);
@@ -1590,14 +1789,18 @@ function updatePickups(){
       }
       playPickup();
       pickups.splice(i,1);
+      if(mode==="multiplayer" && !isHost()){
+        markJustTaken(pu.id);
+        if(channel) channel.send({type:"broadcast", event:"itemTaken", payload:{kind:"pickup", id:pu.id}});
+      }
     }
   }
 }
 
 /* ================= MULTIPLAYER ================= */
-function connectMultiplayer(){
+function connectMultiplayer(roomCodeOverride){
   if(!sb){ setConn(false,"supabase gagal dimuat"); return; }
-  roomCode = (document.getElementById("roomInput").value||"public").trim().toLowerCase() || "public";
+  roomCode = (roomCodeOverride||"public").trim().toLowerCase() || "public";
   roomIsActive = false; roomIsCreator = false; roomEnded = false;
   channel = sb.channel("bladewar-"+roomCode, { config: { broadcast: { self:false }, presence: { key: myId } } });
   joinRoom(); // async, independent of the realtime channel above — see function for what it does on success/failure
@@ -1628,6 +1831,7 @@ function connectMultiplayer(){
     if(payload.id === currentHostId()){
       if(payload.boss) applyNetBossState(payload.boss);
       else if(payload.bossGone) clearNetBoss();
+      if(payload.world) applyWorldSnapshot(payload.world);
     }
   });
 
@@ -1641,7 +1845,7 @@ function connectMultiplayer(){
     if(!c || c.shieldActive) return;
     c.hp -= payload.dmg;
     c.lastHitAt = performance.now();
-    if(c.hp<=0) killCreep(c);
+    if(c.hp<=0) killCreep(c, payload.fromId);
   });
 
   channel.on("broadcast", {event:"bossDeath"}, ({payload})=>{
@@ -1655,6 +1859,33 @@ function connectMultiplayer(){
     for(let i=0;i<3;i++){
       pickups.push({ x:payload.x+rand(-40,40), y:payload.y+rand(-40,40), tier: weightedBruteTier(), id: uid() });
     }
+  });
+
+  // ordinary (non-boss) creeps: the host is the sole owner of the real hp — a mirror on any other
+  // client just forwards the hit here instead of mutating locally, same chokepoint as bossHit above.
+  channel.on("broadcast", {event:"creepHit"}, ({payload})=>{
+    if(!isHost()) return;
+    const c = creeps.find(cc=>!cc.netMirror && !cc.netBoss && cc.id===payload.netId && cc.hp>0);
+    if(!c) return;
+    c.hp -= payload.dmg;
+    if(c.hp<=0) killCreep(c, payload.fromId);
+  });
+
+  // per-kill credit for ordinary creeps (unlike the boss, which everyone gets credit for): only the
+  // client whose id matches killerId actually applies the exp/kill-counter bump.
+  channel.on("broadcast", {event:"killCredit"}, ({payload})=>{
+    if(payload.killerId !== myId) return;
+    gainExp(player, payload.expValue, payload.x, payload.y);
+    kills++;
+  });
+
+  // a guest grabbed a ground item (sword pickup / blade pack) from its local mirror — the host is
+  // authoritative for these lists, so it removes the item for real here; everyone else just stops
+  // seeing it once it's absent from the next world snapshot.
+  channel.on("broadcast", {event:"itemTaken"}, ({payload})=>{
+    if(!isHost()) return;
+    if(payload.kind==="pickup"){ const idx=pickups.findIndex(p=>p.id===payload.id); if(idx>=0) pickups.splice(idx,1); }
+    else if(payload.kind==="bladePack"){ const idx=bladePacks.findIndex(p=>p.id===payload.id); if(idx>=0) bladePacks.splice(idx,1); }
   });
 
   channel.on("broadcast", {event:"orbSpawn"}, ({payload})=>{
@@ -1702,7 +1933,7 @@ function disconnectMultiplayer(){
 async function joinRoom(){
   if(!sb) return;
   try{
-    const { data, error } = await sb.rpc("room_join_or_create", {
+    const { data, error } = await sb.rpc("room_join_or_create_bladewar", {
       p_room: roomCode, p_player_id: myPlayerId, p_name: playerName,
     });
     if(error) throw error;
@@ -1727,18 +1958,19 @@ async function joinRoom(){
   }
 }
 
-// flushRoomStats: reports only what changed since the last flush (deltas), via the atomic
-// room_bump_stats RPC, so several players writing at once never clobber each other's counts.
+// flushRoomStats: reports deltas since the last flush via the atomic room_bump_stats RPC (so several
+// players writing at once never clobber each other's counts) — and, unlike the old version, ALWAYS
+// calls it even with zero deltas, purely as a heartbeat: it's what keeps last_seen fresh so the
+// multiplayer room browser's live "X orang main" count doesn't think an idle-but-connected player left.
 async function flushRoomStats(){
   if(!sb || !roomIsActive || roomEnded) return;
   const curPoints = computePoints(player.level, kills, Math.floor(elapsed));
   const dKills = kills - roomStatsSnapshot.kills;
   const dDeaths = deathCount - roomStatsSnapshot.deaths;
   const dPoints = curPoints - roomStatsSnapshot.points;
-  if(dKills<=0 && dDeaths<=0 && dPoints<=0) return;
   roomStatsSnapshot = { kills, points: curPoints, deaths: deathCount };
   try{
-    await sb.rpc("room_bump_stats", {
+    await sb.rpc("room_bump_stats_bladewar", {
       p_room: roomCode, p_player_id: myPlayerId, p_name: playerName,
       p_dkills: Math.max(0,dKills), p_ddeaths: Math.max(0,dDeaths), p_dpoints: Math.max(0,dPoints),
     });
@@ -1753,7 +1985,7 @@ async function showRoomSummary(forRoomCode, note){
   document.getElementById("exitBtn").classList.add("hidden");
   document.getElementById("exitModal").classList.add("hidden");
   document.getElementById("results").classList.add("hidden");
-  document.getElementById("menu").classList.add("hidden");
+  hideAllScreens();
   document.getElementById("roomSummaryModal").classList.remove("hidden");
   document.getElementById("roomSummarySub").textContent = note || ("Room \""+forRoomCode+"\" sudah berakhir.");
   document.getElementById("roomSummaryBosses").innerHTML = "Memuat rekap…";
@@ -1761,8 +1993,8 @@ async function showRoomSummary(forRoomCode, note){
   if(!sb) return;
   try{
     const [{ data: roomRow }, { data: players, error: pErr }] = await Promise.all([
-      sb.from("bladewar_rooms").select("bosses_defeated").eq("room_code", forRoomCode).maybeSingle(),
-      sb.from("bladewar_room_players").select("name,kills,deaths,points").eq("room_code", forRoomCode).order("points",{ascending:false}),
+      sb.from("rooms_bladewar").select("bosses_defeated").eq("room_code", forRoomCode).maybeSingle(),
+      sb.from("room_players_bladewar").select("name,kills,deaths,points").eq("room_code", forRoomCode).order("points",{ascending:false}),
     ]);
     if(pErr) throw pErr;
     const bosses = (roomRow && roomRow.bosses_defeated) || [];
@@ -1811,6 +2043,18 @@ function broadcastState(){
     } else {
       payload.bossGone = true;
     }
+    // full world snapshot: every ordinary creep + ground sword pickup + blade pack, so every
+    // client renders/collides against the exact same shared field instead of its own local roll
+    payload.world = {
+      creeps: creeps.filter(c=>!c.boss && !c.netMirror && c.hp>0).slice(0, MAX_CREEPS_MP+5).map(c=>({
+        id:c.id, x:Math.round(c.x), y:Math.round(c.y), hp:Math.round(c.hp), maxHp:Math.round(c.maxHp),
+        r:c.radius, dmg:Math.round(c.dmg*10)/10, spd:Math.round(c.speed), xp:c.expValue,
+        b:c.brute?1:0, s:c.swordsman?1:0, sw:c.swords?c.swords.length:0,
+        sp: c.spinAngle? Math.round(c.spinAngle*100)/100 : 0,
+      })),
+      pk: pickups.slice(0,40).map(p=>({ id:p.id, x:Math.round(p.x), y:Math.round(p.y), t:p.tier.key })),
+      bp: bladePacks.map(bp=>({ id:bp.id, x:Math.round(bp.x), y:Math.round(bp.y), k:BLADE_PACKS.indexOf(bp.pack) })),
+    };
   }
   channel.send({ type:"broadcast", event:"state", payload });
 }
@@ -2352,9 +2596,13 @@ function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<
 /* ================= LIFECYCLE ================= */
 let resultsShown = false;
 
-function startGame(selMode){
+function hideAllScreens(){
+  document.querySelectorAll(".app-screen").forEach(el=>el.classList.add("hidden"));
+}
+
+function startGame(selMode, roomCodeOverride){
   ensureAudio();
-  playerName = (document.getElementById("nameInput").value||"Player").trim().slice(0,14) || "Player";
+  // playerName is already resolved by the auth/guest flow before we ever reach this screen
   mode = selMode;
   world = selMode==="survival"? {w:4000,h:4000} : {w:2400,h:2400};
   player = newPlayer();
@@ -2368,14 +2616,14 @@ function startGame(selMode){
   roomStatsSnapshot = { kills:0, points:0, deaths:0 }; lastRoomFlush = 0;
   document.getElementById("chatLog").innerHTML = "";
 
-  document.getElementById("menu").classList.add("hidden");
+  hideAllScreens();
   document.getElementById("results").classList.add("hidden");
   document.getElementById("hud").classList.remove("hidden");
   document.getElementById("skillbar").classList.remove("hidden");
   document.getElementById("exitBtn").classList.remove("hidden");
   document.getElementById("exitModal").classList.add("hidden");
 
-  if(selMode==="multiplayer"){ connectMultiplayer(); }
+  if(selMode==="multiplayer"){ connectMultiplayer(roomCodeOverride); }
   else { document.getElementById("connstatus").classList.add("hidden"); }
 
   running = true; lastT = 0;
@@ -2403,6 +2651,7 @@ function onPlayerDeath(){
   document.getElementById("hud").classList.add("hidden");
   document.getElementById("skillbar").classList.add("hidden");
   document.getElementById("exitBtn").classList.add("hidden");
+  logMatchHistory();
   if(mode==="survival") submitScore(); // auto-kirim skor, progress tertinggi per player_id yang kesimpen
 }
 
@@ -2414,8 +2663,7 @@ function exitToMenu(){
   document.getElementById("exitModal").classList.add("hidden");
   document.getElementById("connstatus").classList.add("hidden");
   document.getElementById("results").classList.add("hidden");
-  document.getElementById("menu").classList.remove("hidden");
-  loadLeaderboard();
+  enterProfile();
 }
 document.getElementById("exitBtn").addEventListener("click", ()=>{
   if(!running) return; // already dead/paused
@@ -2446,12 +2694,13 @@ document.getElementById("btnEndRoom").addEventListener("click", async (e)=>{
   if(!sb || !roomIsActive || !roomIsCreator || roomEnded) return;
   btn.disabled = true; btn.textContent = "Mengakhiri…";
   try{
-    const { data, error } = await sb.rpc("room_end", { p_room: roomCode, p_player_id: myPlayerId });
+    const { data, error } = await sb.rpc("room_end_bladewar", { p_room: roomCode, p_player_id: myPlayerId });
     if(error) throw error;
     if(data && data.ok){
       roomEnded = true;
       if(channel) channel.send({type:"broadcast", event:"roomEnded", payload:{ room: roomCode }});
       await submitScore(); // fold this room's result into the survival leaderboard too
+      await logMatchHistory();
       document.getElementById("exitModal").classList.add("hidden");
       showRoomSummary(roomCode, "Kamu mengakhiri room ini.");
     }
@@ -2563,8 +2812,6 @@ document.getElementById("btnModeCoop").addEventListener("click", ()=>{
   document.getElementById("btnModeVersus").classList.remove("active");
 });
 
-document.getElementById("btnSurvival").addEventListener("click", ()=>startGame("survival"));
-document.getElementById("btnMulti").addEventListener("click", ()=>startGame("multiplayer"));
 document.getElementById("btnBackMenu").addEventListener("click", ()=>{
   if(mode==="multiplayer") disconnectMultiplayer();
   exitToMenu();
@@ -2576,7 +2823,7 @@ async function submitScore(){
   if(statusEl){ statusEl.textContent = "Mengirim skor…"; }
   try{
     // pakai RPC: hanya menimpa skor lama (player_id sama) kalau progress baru lebih tinggi
-    const { error } = await sb.rpc("submit_bladewar_score", {
+    const { error } = await sb.rpc("submit_leaderboard_bladewar", {
       p_player_id: myPlayerId,
       p_name: playerName,
       p_level: player.level,
@@ -2592,12 +2839,13 @@ async function submitScore(){
   }
 }
 
-/* ================= LEADERBOARD ================= */
+/* ================= LEADERBOARD & MATCH HISTORY (profile screen) ================= */
 async function loadLeaderboard(){
   const box = document.getElementById("lbList");
+  if(!box) return;
   if(!sb){ box.innerHTML = '<div class="lb-empty">Supabase tidak tersedia.</div>'; return; }
   try{
-    const { data, error } = await sb.from("bladewar_scores")
+    const { data, error } = await sb.from("leaderboard_bladewar")
       .select("name,level,time_survived,kills,score")
       .order("score", {ascending:false})
       .limit(10);
@@ -2611,7 +2859,171 @@ async function loadLeaderboard(){
     box.innerHTML = '<div class="lb-empty">Belum ada tabel skor di Supabase (lihat setup SQL).</div>';
   }
 }
-loadLeaderboard();
+
+async function logMatchHistory(){
+  if(!sb || !player) return;
+  try{
+    await sb.rpc("log_match_bladewar", {
+      p_player_id: myPlayerId, p_name: playerName, p_mode: mode,
+      p_level: player.level, p_time: Math.floor(elapsed), p_kills: kills,
+    });
+  }catch(e){ console.warn("log match history failed", e); }
+}
+
+async function loadMatchHistory(){
+  const box = document.getElementById("matchHistoryList");
+  if(!box) return;
+  if(!sb){ box.innerHTML = '<div class="lb-empty">Supabase tidak tersedia.</div>'; return; }
+  try{
+    const { data, error } = await sb.from("match_history_bladewar")
+      .select("mode,level,time_survived,kills,points,created_at")
+      .eq("player_id", myPlayerId)
+      .order("created_at", {ascending:false})
+      .limit(10);
+    if(error) throw error;
+    if(!data || data.length===0){ box.innerHTML = '<div class="lb-empty">Belum ada riwayat main.</div>'; return; }
+    box.innerHTML = data.map(row=>
+      `<div class="lb-row"><span>${row.mode==="multiplayer"?"🌐":"⚔"}</span><span style="flex:1">Lv${row.level} · ${fmtTime(row.time_survived)} · ${row.kills} kill</span><span><b>${row.points} pt</b></span></div>`
+    ).join("");
+  }catch(e){
+    console.warn("match history load failed", e);
+    box.innerHTML = '<div class="lb-empty">Belum ada tabel riwayat di Supabase (lihat setup SQL).</div>';
+  }
+}
+
+/* ================= SCREEN NAVIGATION ================= */
+function hideAllScreensNav(){ document.querySelectorAll(".app-screen").forEach(el=>el.classList.add("hidden")); }
+function showScreen(id){ hideAllScreensNav(); document.getElementById(id).classList.remove("hidden"); }
+
+function enterProfile(){
+  document.getElementById("profileName").textContent = playerName + (isGuest? " (Tamu)" : "");
+  document.getElementById("profileEmail").textContent = authUser
+    ? authUser.email
+    : "Main sebagai tamu — progress cuma kesimpen di device ini.";
+  showScreen("profileScreen");
+  loadMatchHistory();
+  loadLeaderboard();
+}
+
+/* ================= AUTH (login / signup / guest) ================= */
+function setAuthMode(m){
+  authMode = m;
+  document.getElementById("tabLogin").classList.toggle("active", m==="login");
+  document.getElementById("tabSignup").classList.toggle("active", m==="signup");
+  document.getElementById("authNameField").classList.toggle("hidden", m!=="signup");
+  document.getElementById("btnAuthSubmit").textContent = m==="signup" ? "Buat Akun" : "Masuk";
+  document.getElementById("authStatus").textContent = "";
+}
+document.getElementById("tabLogin").addEventListener("click", ()=>setAuthMode("login"));
+document.getElementById("tabSignup").addEventListener("click", ()=>setAuthMode("signup"));
+
+function onAuthSuccess(user){
+  const meta = user.user_metadata || {};
+  authUser = { id: user.id, email: user.email, name: (meta.display_name||user.email.split("@")[0]).slice(0,14) };
+  isGuest = false;
+  myPlayerId = authUser.id;
+  playerName = authUser.name;
+  enterProfile();
+}
+
+document.getElementById("authForm").addEventListener("submit", async (e)=>{
+  e.preventDefault();
+  const statusEl = document.getElementById("authStatus");
+  const btn = document.getElementById("btnAuthSubmit");
+  if(!sb){ statusEl.style.color = "#ff5b5b"; statusEl.textContent = "Supabase tidak tersedia — cek koneksi internet."; return; }
+  const email = document.getElementById("authEmail").value.trim();
+  const password = document.getElementById("authPassword").value;
+  btn.disabled = true;
+  statusEl.style.color = "var(--text-dim)";
+  try{
+    if(authMode==="signup"){
+      const name = (document.getElementById("authName").value||"Player").trim().slice(0,14) || "Player";
+      statusEl.textContent = "Membuat akun…";
+      const { data, error } = await sb.auth.signUp({ email, password, options:{ data:{ display_name:name } } });
+      if(error) throw error;
+      if(data.session){ onAuthSuccess(data.session.user); }
+      else { statusEl.style.color="#6bffb0"; statusEl.textContent = "Akun dibuat! Cek email buat verifikasi, lalu masuk."; setAuthMode("login"); }
+    } else {
+      statusEl.textContent = "Masuk…";
+      const { data, error } = await sb.auth.signInWithPassword({ email, password });
+      if(error) throw error;
+      onAuthSuccess(data.user);
+    }
+  }catch(err){
+    console.warn("auth failed", err);
+    statusEl.style.color = "#ff5b5b";
+    statusEl.textContent = (err && err.message) || "Gagal, coba lagi.";
+  }
+  btn.disabled = false;
+});
+
+document.getElementById("btnGuestPlay").addEventListener("click", ()=>{
+  isGuest = true;
+  authUser = null;
+  myPlayerId = getPersistentPlayerId();
+  playerName = (document.getElementById("guestNameInput").value||"Tamu").trim().slice(0,14) || "Tamu";
+  enterProfile();
+});
+
+document.getElementById("btnLogout").addEventListener("click", async ()=>{
+  if(sb && authUser){ try{ await sb.auth.signOut(); }catch(e){} }
+  authUser = null; isGuest = false;
+  myPlayerId = getPersistentPlayerId();
+  document.getElementById("authEmail").value = ""; document.getElementById("authPassword").value = "";
+  showScreen("authScreen");
+});
+
+/* ================= MODE SELECT / ROOM BROWSER NAVIGATION ================= */
+document.getElementById("btnGoModeSelect").addEventListener("click", ()=>{
+  document.getElementById("modeSelectGreeting").textContent = "Halo, "+playerName+"!";
+  showScreen("modeSelect");
+});
+document.getElementById("btnBackFromModeSelect").addEventListener("click", ()=>enterProfile());
+document.getElementById("btnGoSurvival").addEventListener("click", ()=>startGame("survival"));
+document.getElementById("btnGoMultiplayer").addEventListener("click", ()=>{
+  showScreen("roomBrowser");
+  refreshRoomList();
+});
+document.getElementById("btnBackFromRoomBrowser").addEventListener("click", ()=>showScreen("modeSelect"));
+document.getElementById("btnCreateRoom").addEventListener("click", ()=>{
+  const code = "r"+Math.random().toString(36).slice(2,7);
+  startGame("multiplayer", code);
+});
+document.getElementById("btnRefreshRooms").addEventListener("click", refreshRoomList);
+
+async function refreshRoomList(){
+  const box = document.getElementById("roomList");
+  if(!sb){ box.innerHTML = '<div class="lb-empty">Supabase tidak tersedia.</div>'; return; }
+  box.innerHTML = '<div class="lb-empty">Memuat…</div>';
+  try{
+    const { data, error } = await sb.rpc("list_active_rooms_bladewar");
+    if(error) throw error;
+    if(!data || data.length===0){ box.innerHTML = '<div class="lb-empty">Belum ada room aktif. Bikin yang pertama!</div>'; return; }
+    box.innerHTML = data.map(r=>
+      `<div class="room-row" data-room="${escapeHtml(r.room_code)}">
+        <span>🚪 ${escapeHtml(r.room_code)}</span>
+        <span class="room-meta">${r.player_count} orang · menit ke-${Math.floor((r.elapsed_seconds||0)/60)}</span>
+      </div>`
+    ).join("");
+    box.querySelectorAll(".room-row").forEach(el=>{
+      el.addEventListener("click", ()=>startGame("multiplayer", el.dataset.room));
+    });
+  }catch(e){
+    console.warn("room list load failed", e);
+    box.innerHTML = '<div class="lb-empty">Gagal memuat daftar room (lihat setup SQL).</div>';
+  }
+}
+
+/* ================= BOOT: restore an existing Supabase session, else show the login screen ================= */
+(async function boot(){
+  if(sb){
+    try{
+      const { data } = await sb.auth.getSession();
+      if(data && data.session && data.session.user){ onAuthSuccess(data.session.user); return; }
+    }catch(e){ console.warn("session restore failed", e); }
+  }
+  showScreen("authScreen");
+})();
 
 })();
 </script>
