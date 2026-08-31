@@ -108,6 +108,15 @@
   }
   .icon-btn:hover{ color:var(--text); border-color:var(--accent-2); }
   .auth-field{ display:flex; flex-direction:column; }
+  .profile-avatar{
+    width:64px; height:64px; border-radius:50%; margin:4px auto 12px; display:flex; align-items:center; justify-content:center;
+    font-size:26px; font-weight:800; color:#0b0d14; background: linear-gradient(135deg, #ff5b5b, #ffa94d);
+    box-shadow: 0 8px 20px rgba(255,91,91,0.3);
+  }
+  #playModal{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    background: rgba(5,6,10,0.85); z-index:22; overflow-y:auto;
+  }
 
   /* ---------- HUD ---------- */
   #hud{ position:absolute; inset:0; pointer-events:none; z-index:5; }
@@ -168,10 +177,20 @@
     position:absolute; left:50%; bottom:14px; width:260px; transform:translateX(-50%); pointer-events:auto;
     background: rgba(15,17,28,0.72); border:1px solid #2b3050; border-radius:10px;
     padding:8px; box-shadow: 0 4px 16px rgba(0,0,0,0.4); display:flex; flex-direction:column; gap:6px;
+    transition: background .25s ease;
   }
-  #chatLog{ max-height:110px; overflow-y:auto; font-size:11px; line-height:1.4; display:flex; flex-direction:column; gap:2px; }
+  #chatLog{
+    max-height:110px; overflow-y:auto; font-size:11px; line-height:1.4; display:flex; flex-direction:column; gap:2px;
+    transition: max-height .3s ease;
+    -webkit-mask-image: linear-gradient(to bottom, transparent, black 22px, black 100%);
+    mask-image: linear-gradient(to bottom, transparent, black 22px, black 100%);
+  }
   #chatLog .chat-line b{ color:#8be9ff; }
   #chatLog .chat-line.me b{ color:#ffd43b; }
+  /* idle state: card shrinks down to just a peek of the last line, fading upward — expands again
+     the moment you focus the input or a new message comes in (see chatExpand()/chatCollapse()) */
+  #chatBox.chat-collapsed{ background: rgba(15,17,28,0.4); }
+  #chatBox.chat-collapsed #chatLog{ max-height:20px; }
   #chatForm{ display:flex; gap:6px; }
   #chatInput{
     flex:1; min-width:0; background:#12141f; border:1px solid #2b3050; border-radius:6px;
@@ -303,8 +322,8 @@
           <input type="text" id="authName" maxlength="14" placeholder="Nama kamu">
         </div>
         <div class="auth-field">
-          <label>Email</label>
-          <input type="email" id="authEmail" placeholder="email@contoh.com">
+          <label>Username</label>
+          <input type="text" id="authEmail" placeholder="contoh: slendhun" autocomplete="username">
         </div>
         <div class="auth-field">
           <label>Password</label>
@@ -343,57 +362,49 @@
   </div>
 </div>
 
-<!-- ================= SCREEN 2: profile (name, match history, leaderboard) ================= -->
+<!-- ================= SCREEN 2: profile (avatar, name, match history below, leaderboard) ================= -->
 <div id="profileScreen" class="app-screen hidden">
-  <div class="menu-wrap" style="justify-content:center;">
-    <div class="menu-card">
+  <div class="menu-wrap" style="flex-direction:column; align-items:center; max-width:460px;">
+    <div class="menu-card" style="width:100%;">
       <div class="title">BLADEWAR</div>
-      <div class="subtitle" id="profileName">Player</div>
-      <div class="sub" id="profileEmail" style="text-align:center; color:var(--text-dim); font-size:12px; margin-top:-16px; margin-bottom:14px;"></div>
-      <button class="btn btn-mp" id="btnGoModeSelect">▶ Main</button>
+      <div class="profile-avatar" id="profileAvatar">?</div>
+      <div class="subtitle" id="profileName" style="margin-bottom:2px;">Player</div>
+      <div class="sub" id="profileEmail" style="text-align:center; color:var(--text-dim); font-size:12px; margin-bottom:14px;"></div>
+      <button class="btn btn-mp" id="btnOpenPlay">▶ Main</button>
       <button class="btn btn-secondary" id="btnLogout">Keluar Akun</button>
     </div>
-    <div class="menu-col">
-      <div class="side-panel">
-        <h3>Riwayat Main</h3>
-        <div id="matchHistoryList" class="panel-body"><div class="lb-empty">Memuat…</div></div>
-      </div>
+    <div class="side-panel" style="width:100%; margin-top:18px; max-height:none;">
+      <h3>Riwayat Main</h3>
+      <div id="matchHistoryList" class="panel-body"><div class="lb-empty">Memuat…</div></div>
     </div>
-    <div class="menu-col">
-      <div id="leaderboard">
-        <h3>Top Survival</h3>
-        <div id="lbList" class="panel-body"><div class="lb-empty">Memuat…</div></div>
-      </div>
+    <div id="leaderboard" style="width:100%; margin-top:18px; max-height:none;">
+      <h3>Top Survival</h3>
+      <div id="lbList" class="panel-body"><div class="lb-empty">Memuat…</div></div>
     </div>
   </div>
 </div>
 
-<!-- ================= SCREEN 3: mode select ================= -->
-<div id="modeSelect" class="app-screen hidden">
-  <div class="menu-wrap" style="justify-content:center;">
+<!-- ================= POPUP: Main (Survival / Multiplayer + room list) ================= -->
+<div id="playModal" class="hidden">
+  <div class="menu-wrap" style="justify-content:center; padding-top:24px; padding-bottom:24px;">
     <div class="menu-card">
-      <div class="title">BLADEWAR</div>
-      <div class="subtitle" id="modeSelectGreeting">Halo!</div>
+      <div class="panel-title-row">
+        <div class="title" style="margin:0;">Main</div>
+        <button type="button" class="icon-btn" id="btnClosePlayModal">✕</button>
+      </div>
+      <div class="subtitle" id="playModalGreeting">Halo!</div>
       <button class="btn btn-survival" id="btnGoSurvival">⚔ Survival (Single Player)</button>
-      <button class="btn btn-mp" id="btnGoMultiplayer">🌐 Multiplayer</button>
-      <button class="btn btn-secondary" id="btnBackFromModeSelect">◀ Kembali</button>
-    </div>
-  </div>
-</div>
-
-<!-- ================= SCREEN 4: multiplayer room browser ================= -->
-<div id="roomBrowser" class="app-screen hidden">
-  <div class="menu-wrap" style="justify-content:center;">
-    <div class="menu-card">
-      <div class="title">Multiplayer</div>
-      <div class="subtitle">Gabung room yang lagi aktif, atau bikin baru — semua pemain di room yang sama lihat musuh &amp; powerup yang identik.</div>
+      <div style="display:flex; align-items:center; gap:10px; margin:16px 0;">
+        <div style="flex:1;height:1px;background:#2b3050;"></div>
+        <span style="font-size:11px;color:var(--text-dim);">Multiplayer</span>
+        <div style="flex:1;height:1px;background:#2b3050;"></div>
+      </div>
       <label>Mode Kamu</label>
       <div class="mode-toggle">
         <button type="button" class="mode-btn active" id="btnModeVersus">⚔ Saling Lawan</button>
         <button type="button" class="mode-btn" id="btnModeCoop">🤝 Berteman</button>
       </div>
       <button class="btn btn-mp" id="btnCreateRoom" style="margin-top:14px;">➕ Buat Room Baru</button>
-      <button class="btn btn-secondary" id="btnBackFromRoomBrowser">◀ Kembali</button>
     </div>
     <div class="menu-col" style="flex:1.3 1 340px; max-width:460px;">
       <div class="side-panel" style="max-height:none;">
@@ -1973,6 +1984,7 @@ async function flushRoomStats(){
     await sb.rpc("room_bump_stats_bladewar", {
       p_room: roomCode, p_player_id: myPlayerId, p_name: playerName,
       p_dkills: Math.max(0,dKills), p_ddeaths: Math.max(0,dDeaths), p_dpoints: Math.max(0,dPoints),
+      p_level: player.level,
     });
   }catch(e){ console.warn("room stat flush failed", e); }
 }
@@ -2112,7 +2124,21 @@ function checkPvpHits(){
 
 /* ================= UPDATE LOOP ================= */
 let lastT = 0;
+// loop() is the actual requestAnimationFrame callback: it's just a thin safety wrapper around
+// loopFrame() so that if ANY single frame throws (an edge case we didn't anticipate — a weird
+// combo of boss passive + multiplayer sync + who knows what), the error is logged and swallowed
+// instead of silently killing requestAnimationFrame forever. Without this, one bad frame means
+// the whole game visibly "freezes" (canvas stops updating) while unrelated DOM buttons — chat,
+// Keluar — keep working fine, because they're separate listeners untouched by the dead loop.
 function loop(t){
+  try{
+    loopFrame(t);
+  }catch(err){
+    console.error("Bladewar: frame error, dilewati supaya game nggak macet total:", err);
+    if(running) requestAnimationFrame(loop);
+  }
+}
+function loopFrame(t){
   if(!running) return;
   if(!lastT) lastT = t;
   let dt = (t-lastT)/1000;
@@ -2598,6 +2624,7 @@ let resultsShown = false;
 
 function hideAllScreens(){
   document.querySelectorAll(".app-screen").forEach(el=>el.classList.add("hidden"));
+  document.getElementById("playModal").classList.add("hidden");
 }
 
 function startGame(selMode, roomCodeOverride){
@@ -2732,6 +2759,18 @@ document.getElementById("btnCloseRoomSummary").addEventListener("click", ()=>{
 
 /* ================= CHAT (multiplayer only, session-only, nothing persisted) ================= */
 const CHAT_MAX_LINES = 30;
+const CHAT_IDLE_MS = 3000; // how long the box stays fully open after the last activity before it minimizes back down
+let chatIdleTimer = null;
+function chatExpand(){
+  document.getElementById("chatBox").classList.remove("chat-collapsed");
+  clearTimeout(chatIdleTimer);
+  chatIdleTimer = setTimeout(chatCollapse, CHAT_IDLE_MS);
+}
+function chatCollapse(){
+  // don't minimize while the player is actively typing — only once they've stepped away
+  if(document.activeElement === document.getElementById("chatInput")) return;
+  document.getElementById("chatBox").classList.add("chat-collapsed");
+}
 function addChatLine(name, text, isMe){
   const log = document.getElementById("chatLog");
   const line = document.createElement("div");
@@ -2740,16 +2779,21 @@ function addChatLine(name, text, isMe){
   log.appendChild(line);
   while(log.children.length > CHAT_MAX_LINES) log.removeChild(log.firstChild);
   log.scrollTop = log.scrollHeight;
+  chatExpand(); // pop open to show the new line, then auto-minimize again after a few quiet seconds
 }
+document.getElementById("chatInput").addEventListener("focus", chatExpand);
 document.getElementById("chatForm").addEventListener("submit", (e)=>{
   e.preventDefault();
   const input = document.getElementById("chatInput");
   const text = input.value.trim().slice(0,80);
   input.value = "";
+  chatExpand();
   if(!text || mode!=="multiplayer" || !channel) return;
   addChatLine(playerName+" (kamu)", text, true); // broadcast self:false — show our own line locally right away
   channel.send({type:"broadcast", event:"chat", payload:{ name:playerName, text }});
 });
+// start minimized — it pops open the moment a message arrives or the player taps into it
+chatCollapse();
 
 /* ================= MENU GALLERIES (always visible on the main menu now) ================= */
 const ENEMY_INFO = [
@@ -2892,20 +2936,40 @@ async function loadMatchHistory(){
 }
 
 /* ================= SCREEN NAVIGATION ================= */
-function hideAllScreensNav(){ document.querySelectorAll(".app-screen").forEach(el=>el.classList.add("hidden")); }
+function hideAllScreensNav(){
+  document.querySelectorAll(".app-screen").forEach(el=>el.classList.add("hidden"));
+  document.getElementById("playModal").classList.add("hidden");
+}
 function showScreen(id){ hideAllScreensNav(); document.getElementById(id).classList.remove("hidden"); }
 
 function enterProfile(){
   document.getElementById("profileName").textContent = playerName + (isGuest? " (Tamu)" : "");
+  document.getElementById("profileAvatar").textContent = (playerName||"?").trim().charAt(0).toUpperCase() || "?";
   document.getElementById("profileEmail").textContent = authUser
-    ? authUser.email
+    ? "@"+authUser.username
     : "Main sebagai tamu — progress cuma kesimpen di device ini.";
   showScreen("profileScreen");
+  document.getElementById("playModal").classList.add("hidden");
   loadMatchHistory();
   loadLeaderboard();
 }
 
 /* ================= AUTH (login / signup / guest) ================= */
+// Login/akun dipakai bareng sama game lain di project Supabase ini, yang nyimpen akun sebagai
+// "username@fishing-fps.local" (bukan email beneran). Jadi pemain cukup ngetik username-nya aja
+// (mis. "slendhun") — kalau yang diketik belum ada tanda @, kita otomatis tambahin domainnya di
+// belakang layar sebelum manggil Supabase Auth.
+const AUTH_EMAIL_DOMAIN = "fishing-fps.local";
+function normalizeAuthEmail(input){
+  input = (input||"").trim().toLowerCase();
+  if(!input) return "";
+  return input.includes("@") ? input : input+"@"+AUTH_EMAIL_DOMAIN;
+}
+function displayUsername(email){
+  if(!email) return "";
+  return email.toLowerCase().endsWith("@"+AUTH_EMAIL_DOMAIN) ? email.slice(0, -("@"+AUTH_EMAIL_DOMAIN).length) : email;
+}
+
 function setAuthMode(m){
   authMode = m;
   document.getElementById("tabLogin").classList.toggle("active", m==="login");
@@ -2919,7 +2983,8 @@ document.getElementById("tabSignup").addEventListener("click", ()=>setAuthMode("
 
 function onAuthSuccess(user){
   const meta = user.user_metadata || {};
-  authUser = { id: user.id, email: user.email, name: (meta.display_name||user.email.split("@")[0]).slice(0,14) };
+  const username = displayUsername(user.email);
+  authUser = { id: user.id, email: user.email, username, name: (meta.display_name||username).slice(0,14) };
   isGuest = false;
   myPlayerId = authUser.id;
   playerName = authUser.name;
@@ -2931,13 +2996,19 @@ document.getElementById("authForm").addEventListener("submit", async (e)=>{
   const statusEl = document.getElementById("authStatus");
   const btn = document.getElementById("btnAuthSubmit");
   if(!sb){ statusEl.style.color = "#ff5b5b"; statusEl.textContent = "Supabase tidak tersedia — cek koneksi internet."; return; }
-  const email = document.getElementById("authEmail").value.trim();
+  const rawInput = document.getElementById("authEmail").value.trim();
   const password = document.getElementById("authPassword").value;
   statusEl.style.color = "#ff5b5b";
   // validasi sendiri (bukan pop-up bawaan browser yang bahasa Inggris & suka bikin bingung) —
-  // pesannya langsung tampil rapi di bawah form, bahasa Indonesia
-  if(!email || !email.includes("@") || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
-    statusEl.textContent = "Masukkan email yang valid ya (harus ada tanda @), contoh: nama@gmail.com";
+  // pesannya langsung tampil rapi di bawah form, bahasa Indonesia. Username cukup huruf/angka/._- ,
+  // atau boleh juga ketik email beneran kalau ada tanda @.
+  const looksLikeEmailAttempt = rawInput.includes("@");
+  const validUsername = /^[a-zA-Z0-9_.-]{3,20}$/.test(rawInput);
+  const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawInput);
+  if(!rawInput || (looksLikeEmailAttempt ? !validEmail : !validUsername)){
+    statusEl.textContent = looksLikeEmailAttempt
+      ? "Format email belum valid, contoh: nama@gmail.com"
+      : "Masukkan username kamu (3-20 huruf/angka), contoh: slendhun";
     document.getElementById("authEmail").focus();
     return;
   }
@@ -2946,11 +3017,12 @@ document.getElementById("authForm").addEventListener("submit", async (e)=>{
     document.getElementById("authPassword").focus();
     return;
   }
+  const email = normalizeAuthEmail(rawInput);
   btn.disabled = true;
   statusEl.style.color = "var(--text-dim)";
   try{
     if(authMode==="signup"){
-      const name = (document.getElementById("authName").value||"Player").trim().slice(0,14) || "Player";
+      const name = (document.getElementById("authName").value||rawInput).trim().slice(0,14) || "Player";
       statusEl.textContent = "Membuat akun…";
       const { data, error } = await sb.auth.signUp({ email, password, options:{ data:{ display_name:name } } });
       if(error) throw error;
@@ -2965,7 +3037,9 @@ document.getElementById("authForm").addEventListener("submit", async (e)=>{
   }catch(err){
     console.warn("auth failed", err);
     statusEl.style.color = "#ff5b5b";
-    statusEl.textContent = (err && err.message) || "Gagal, coba lagi.";
+    statusEl.textContent = (err && err.message==="Invalid login credentials")
+      ? "Username atau password salah."
+      : ((err && err.message) || "Gagal, coba lagi.");
   }
   btn.disabled = false;
 });
@@ -2986,18 +3060,16 @@ document.getElementById("btnLogout").addEventListener("click", async ()=>{
   showScreen("authScreen");
 });
 
-/* ================= MODE SELECT / ROOM BROWSER NAVIGATION ================= */
-document.getElementById("btnGoModeSelect").addEventListener("click", ()=>{
-  document.getElementById("modeSelectGreeting").textContent = "Halo, "+playerName+"!";
-  showScreen("modeSelect");
+/* ================= "MAIN" POPUP: survival / multiplayer + room list, all in one card ================= */
+document.getElementById("btnOpenPlay").addEventListener("click", ()=>{
+  document.getElementById("playModalGreeting").textContent = "Halo, "+playerName+"! Main sendiri atau bareng-bareng?";
+  document.getElementById("playModal").classList.remove("hidden");
+  refreshRoomList(); // room list langsung kelihatan begitu popup dibuka — tinggal klik buat join
 });
-document.getElementById("btnBackFromModeSelect").addEventListener("click", ()=>enterProfile());
+document.getElementById("btnClosePlayModal").addEventListener("click", ()=>{
+  document.getElementById("playModal").classList.add("hidden");
+});
 document.getElementById("btnGoSurvival").addEventListener("click", ()=>startGame("survival"));
-document.getElementById("btnGoMultiplayer").addEventListener("click", ()=>{
-  showScreen("roomBrowser");
-  refreshRoomList();
-});
-document.getElementById("btnBackFromRoomBrowser").addEventListener("click", ()=>showScreen("modeSelect"));
 document.getElementById("btnCreateRoom").addEventListener("click", ()=>{
   const code = "r"+Math.random().toString(36).slice(2,7);
   startGame("multiplayer", code);
@@ -3015,7 +3087,7 @@ async function refreshRoomList(){
     box.innerHTML = data.map(r=>
       `<div class="room-row" data-room="${escapeHtml(r.room_code)}">
         <span>🚪 ${escapeHtml(r.room_code)}</span>
-        <span class="room-meta">${r.player_count} orang · menit ke-${Math.floor((r.elapsed_seconds||0)/60)}</span>
+        <span class="room-meta">${Math.floor((r.elapsed_seconds||0)/60)} menit · ${r.player_count} orang · Lv tertinggi ${r.top_level||1}</span>
       </div>`
     ).join("");
     box.querySelectorAll(".room-row").forEach(el=>{
