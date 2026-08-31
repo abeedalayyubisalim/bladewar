@@ -297,18 +297,18 @@
         <button type="button" class="mode-btn active" id="tabLogin">Masuk</button>
         <button type="button" class="mode-btn" id="tabSignup">Buat Akun</button>
       </div>
-      <form id="authForm">
+      <form id="authForm" novalidate>
         <div class="auth-field hidden" id="authNameField">
           <label>Nama Pemain</label>
           <input type="text" id="authName" maxlength="14" placeholder="Nama kamu">
         </div>
         <div class="auth-field">
           <label>Email</label>
-          <input type="email" id="authEmail" required placeholder="email@contoh.com">
+          <input type="email" id="authEmail" placeholder="email@contoh.com">
         </div>
         <div class="auth-field">
           <label>Password</label>
-          <input type="password" id="authPassword" required minlength="6" placeholder="Minimal 6 karakter">
+          <input type="password" id="authPassword" placeholder="Minimal 6 karakter">
         </div>
         <button type="submit" class="btn btn-mp" id="btnAuthSubmit">Masuk</button>
       </form>
@@ -2933,6 +2933,19 @@ document.getElementById("authForm").addEventListener("submit", async (e)=>{
   if(!sb){ statusEl.style.color = "#ff5b5b"; statusEl.textContent = "Supabase tidak tersedia — cek koneksi internet."; return; }
   const email = document.getElementById("authEmail").value.trim();
   const password = document.getElementById("authPassword").value;
+  statusEl.style.color = "#ff5b5b";
+  // validasi sendiri (bukan pop-up bawaan browser yang bahasa Inggris & suka bikin bingung) —
+  // pesannya langsung tampil rapi di bawah form, bahasa Indonesia
+  if(!email || !email.includes("@") || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
+    statusEl.textContent = "Masukkan email yang valid ya (harus ada tanda @), contoh: nama@gmail.com";
+    document.getElementById("authEmail").focus();
+    return;
+  }
+  if(!password || password.length < 6){
+    statusEl.textContent = "Password minimal 6 karakter.";
+    document.getElementById("authPassword").focus();
+    return;
+  }
   btn.disabled = true;
   statusEl.style.color = "var(--text-dim)";
   try{
