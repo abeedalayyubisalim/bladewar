@@ -317,10 +317,6 @@
         <button type="button" class="mode-btn" id="tabSignup">Buat Akun</button>
       </div>
       <form id="authForm" novalidate>
-        <div class="auth-field hidden" id="authNameField">
-          <label>Nama Pemain</label>
-          <input type="text" id="authName" maxlength="14" placeholder="Nama kamu">
-        </div>
         <div class="auth-field">
           <label>Username</label>
           <input type="text" id="authEmail" placeholder="contoh: slendhun" autocomplete="username">
@@ -337,11 +333,7 @@
         <span style="font-size:11px;color:var(--text-dim);">atau</span>
         <div style="flex:1;height:1px;background:#2b3050;"></div>
       </div>
-      <div class="auth-field">
-        <label>Main sebagai Tamu (tanpa akun)</label>
-        <input type="text" id="guestNameInput" maxlength="14" placeholder="Nama kamu (opsional)">
-      </div>
-      <button type="button" class="btn btn-secondary" id="btnGuestPlay">▶ Main sebagai Tamu</button>
+      <button type="button" class="btn btn-secondary" id="btnGuestPlay">▶ Main sebagai Tamu (langsung main, tanpa isi apa-apa)</button>
     </div>
     <div class="menu-col">
       <div class="side-panel">
@@ -362,10 +354,10 @@
   </div>
 </div>
 
-<!-- ================= SCREEN 2: profile (avatar, name, match history below, leaderboard) ================= -->
+<!-- ================= SCREEN 2: profile (avatar+name card, match history & top survival to the right) ================= -->
 <div id="profileScreen" class="app-screen hidden">
-  <div class="menu-wrap" style="flex-direction:column; align-items:center; max-width:460px;">
-    <div class="menu-card" style="width:100%;">
+  <div class="menu-wrap">
+    <div class="menu-card">
       <div class="title">BLADEWAR</div>
       <div class="profile-avatar" id="profileAvatar">?</div>
       <div class="subtitle" id="profileName" style="margin-bottom:2px;">Player</div>
@@ -373,13 +365,15 @@
       <button class="btn btn-mp" id="btnOpenPlay">▶ Main</button>
       <button class="btn btn-secondary" id="btnLogout">Keluar Akun</button>
     </div>
-    <div class="side-panel" style="width:100%; margin-top:18px; max-height:none;">
-      <h3>Riwayat Main</h3>
-      <div id="matchHistoryList" class="panel-body"><div class="lb-empty">Memuat…</div></div>
-    </div>
-    <div id="leaderboard" style="width:100%; margin-top:18px; max-height:none;">
-      <h3>Top Survival</h3>
-      <div id="lbList" class="panel-body"><div class="lb-empty">Memuat…</div></div>
+    <div class="menu-col">
+      <div class="side-panel">
+        <h3>Riwayat Main</h3>
+        <div id="matchHistoryList" class="panel-body"><div class="lb-empty">Memuat…</div></div>
+      </div>
+      <div id="leaderboard">
+        <h3>Top Survival</h3>
+        <div id="lbList" class="panel-body"><div class="lb-empty">Memuat…</div></div>
+      </div>
     </div>
   </div>
 </div>
@@ -2974,7 +2968,6 @@ function setAuthMode(m){
   authMode = m;
   document.getElementById("tabLogin").classList.toggle("active", m==="login");
   document.getElementById("tabSignup").classList.toggle("active", m==="signup");
-  document.getElementById("authNameField").classList.toggle("hidden", m!=="signup");
   document.getElementById("btnAuthSubmit").textContent = m==="signup" ? "Buat Akun" : "Masuk";
   document.getElementById("authStatus").textContent = "";
 }
@@ -3022,7 +3015,8 @@ document.getElementById("authForm").addEventListener("submit", async (e)=>{
   statusEl.style.color = "var(--text-dim)";
   try{
     if(authMode==="signup"){
-      const name = (document.getElementById("authName").value||rawInput).trim().slice(0,14) || "Player";
+      // user baru nggak perlu isi nama terpisah — nama tampilannya langsung dari username yang tadi diketik
+      const name = rawInput.trim().slice(0,14) || "Player";
       statusEl.textContent = "Membuat akun…";
       const { data, error } = await sb.auth.signUp({ email, password, options:{ data:{ display_name:name } } });
       if(error) throw error;
@@ -3048,7 +3042,9 @@ document.getElementById("btnGuestPlay").addEventListener("click", ()=>{
   isGuest = true;
   authUser = null;
   myPlayerId = getPersistentPlayerId();
-  playerName = (document.getElementById("guestNameInput").value||"Tamu").trim().slice(0,14) || "Tamu";
+  // user baru nggak perlu isi nama — langsung dikasih nama tamu otomatis, unik per device
+  // (dipertahankan sama tiap kali balik lagi, dari 4 karakter terakhir id tamu yang kesimpen)
+  playerName = "Tamu" + myPlayerId.slice(-4).toUpperCase();
   enterProfile();
 });
 
