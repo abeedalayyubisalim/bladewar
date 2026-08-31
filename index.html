@@ -311,7 +311,7 @@
   <div class="menu-wrap">
     <div class="menu-card">
       <div class="title">BLADEWAR</div>
-      <div class="subtitle">Masuk buat nyimpen progress &amp; muncul di leaderboard, atau langsung main sebagai tamu.</div>
+      <div class="subtitle">Play and Clash</div>
       <div class="mode-toggle">
         <button type="button" class="mode-btn active" id="tabLogin">Masuk</button>
         <button type="button" class="mode-btn" id="tabSignup">Buat Akun</button>
@@ -319,7 +319,7 @@
       <form id="authForm" novalidate>
         <div class="auth-field">
           <label>Username</label>
-          <input type="text" id="authEmail" placeholder="contoh: slendhun" autocomplete="username">
+          <input type="text" id="authEmail" placeholder="contoh: User ID" autocomplete="username">
         </div>
         <div class="auth-field">
           <label>Password</label>
@@ -333,7 +333,7 @@
         <span style="font-size:11px;color:var(--text-dim);">atau</span>
         <div style="flex:1;height:1px;background:#2b3050;"></div>
       </div>
-      <button type="button" class="btn btn-secondary" id="btnGuestPlay">▶ Main sebagai Tamu (langsung main, tanpa isi apa-apa)</button>
+      <button type="button" class="btn btn-secondary" id="btnGuestPlay">Guest Mode</button>
     </div>
     <div class="menu-col">
       <div class="side-panel">
@@ -2796,7 +2796,7 @@ const ENEMY_INFO = [
   { key:"brute", label:"Brute", color:"#ff6b6b", icon:"●",
     desc:"HP lebih tebal dan pukulannya sakit. Hampir selalu drop pedang bagus kalau berhasil dikalahin." },
   { key:"swordsman", label:"Musuh Bersenjata", color:"#c58bff", icon:"⚔️",
-    desc:"Punya blade sendiri yang ikut muter. Bisa ambil pedang di field buat naikin kekuatan, dan bisa beradu blade — yang lebih lemah bakal pecah." },
+    desc:"Punya blade sendiri yang ikut muter. Bisa ambil pedang di field buat naikin kekuatan, dan bisa beradu blade." },
   { key:"boss", label:"Boss", color:"#ff2d4d", icon:"💀",
     desc:"HP dan damage-nya besar, dan tiap muncul dapet 1 skill pasif acak (Regenerasi/Amukan/Gelombang Kejut/Panggilan/Perisai) biar tiap fight kerasa beda. Di multiplayer boss-nya sama persis buat semua pemain. Selalu drop Blade Pack + pedang bagus kalau dikalahin." },
 ];
@@ -2823,7 +2823,7 @@ function renderSwordGallery(){
 }
 function renderSkillGallery(){
   document.getElementById("skillGallery").innerHTML = `<div style="font-size:11px; color:var(--text-dim); margin-bottom:8px; line-height:1.4;">
-      3 slot skill, didapat dari orb di field, cuma berlaku selama game jalan. Semua skill <b>pasif</b> — otomatis aktif sendiri tiap cooldown, nggak perlu ditekan.
+      3 slot <b>pasif</b> skill
     </div>` + SKILLS.map(s=>`
     <div class="gitem" style="border-left-color:${s.color}">
       <div class="gitem-icon" style="color:${s.color}">${s.icon}</div>
