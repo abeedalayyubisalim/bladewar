@@ -2037,7 +2037,7 @@ function renderSwordGallery(){
 }
 function renderSkillGallery(){
   document.getElementById("skillGallery").innerHTML = `<div style="font-size:11px; color:var(--text-dim); margin-bottom:8px; line-height:1.4;">
-      3 slot skill, didapat dari orb di field, cuma berlaku selama game jalan. Semua skill <b>pasif</b> — otomatis aktif sendiri tiap cooldown, nggak perlu ditekan.
+      3 slot <b>pasif</b> skill
     </div>` + SKILLS.map(s=>`
     <div class="gitem" style="border-left-color:${s.color}">
       <div class="gitem-icon" style="color:${s.color}">${s.icon}</div>
