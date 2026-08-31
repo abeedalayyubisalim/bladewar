@@ -108,6 +108,19 @@
     opacity:0; transition: opacity .3s, transform .3s; pointer-events:none;
   }
 
+  #bossbar{
+    position:absolute; top:64px; left:50%; transform:translateX(-50%); width:min(440px,80vw);
+  }
+  #bossName{
+    text-align:center; font-size:13px; font-weight:800; color:#ff5b6d; letter-spacing:1px;
+    text-shadow:0 2px 8px rgba(0,0,0,.7); margin-bottom:3px;
+  }
+  #bossbar-outer{
+    width:100%; height:12px; border-radius:7px; background:#20233a; overflow:hidden;
+    border:1px solid rgba(255,91,109,0.5);
+  }
+  #bossbar-fill{ height:100%; background: linear-gradient(90deg,#8b0000,#ff2d4d); width:100%; transition:width .15s; }
+
   #joystick-zone{ position:absolute; left:0; bottom:0; width:45%; height:45%; z-index:6; }
   #joystick-base{
     position:absolute; width:110px; height:110px; border-radius:50%; background: rgba(255,255,255,0.07);
@@ -144,7 +157,7 @@
   .result-card h2{ margin:0 0 4px; font-size:26px; }
   .result-card .sub{ color:var(--text-dim); font-size:13px; margin-bottom:18px;}
   .result-stats{ display:flex; justify-content:space-around; margin: 18px 0; }
-  .result-stats div{ font-size:22px; font-weight:800; }
+  .result-stats div{ font-size:18px; font-weight:800; }
   .result-stats span{ display:block; font-size:11px; color:var(--text-dim); font-weight:500; margin-top:2px;}
 
   /* ---------- Gallery ---------- */
@@ -246,6 +259,10 @@
       <div id="rosterList"></div>
     </div>
   </div>
+  <div id="bossbar" class="hidden">
+    <div id="bossName">Boss</div>
+    <div id="bossbar-outer"><div id="bossbar-fill"></div></div>
+  </div>
   <div id="banner"></div>
 </div>
 
@@ -291,6 +308,7 @@
       <div><span id="resTime">00:00</span><span>Waktu</span></div>
       <div><span id="resLevel">1</span><span>Level</span></div>
       <div><span id="resKills">0</span><span>Kills</span></div>
+      <div><span id="resPoints">0</span><span>Poin</span></div>
     </div>
     <div class="sub" id="scoreStatus" style="min-height:16px;"></div>
     <button class="btn btn-secondary" id="btnBackMenu">Kembali ke Menu</button>
@@ -323,8 +341,8 @@ const SWORD_TIERS = [
   { key:"vampiric",  label:"Vampiric Fang", color:"#ff2d78", dmg:9,  weight:9,  lifesteal:0.22,
     desc:"Setiap serangan yang kena musuh langsung menyembuhkan sebagian HP kamu (lifesteal 22%). Cocok buat bertahan lama." },
 ];
-const MAX_SWORDS = 10;
-const GROW_UNTIL = 6; // freely add swords until this many; after that, only upgrade if stronger than your weakest
+const MAX_SWORDS = 20;
+const GROW_UNTIL = 10; // freely add swords until this many; after that, only upgrade if stronger than your weakest
 const HIT_COOLDOWN = 260; // ms, per sword-vs-target
 const PLAYER_IFRAME = 500; // ms invulnerability after hit
 const BASE_ORBIT_RADIUS = 46;
@@ -352,6 +370,28 @@ const SKILLS = [
 function skillByKey(key){ return SKILLS.find(s=>s.key===key); }
 function skillLevelMult(level){ return 1 + (level-1)*0.25; } // +25% effect per level (max lvl 5 => +100%)
 
+// Blade Pack power-ups: rare field drops that add a bunch of blades at once (up to the 20-blade cap).
+// Bigger packs are rarer AND come with better-quality blades.
+const BLADE_PACKS = [
+  { amount:5,  tierKey:"common",    color:"#c7ccd8", weight:48 },
+  { amount:10, tierKey:"rare",      color:"#4dabf7", weight:28 },
+  { amount:15, tierKey:"epic",      color:"#b563ff", weight:16 },
+  { amount:20, tierKey:"legendary", color:"#ffa94d", weight:8  },
+];
+function pickBladePack(){
+  const total = BLADE_PACKS.reduce((s,b)=>s+b.weight,0);
+  let r = Math.random()*total;
+  for(const b of BLADE_PACKS){ if(r < b.weight) return b; r -= b.weight; }
+  return BLADE_PACKS[0];
+}
+function pickBossBladePack(){
+  // boss reward — skewed toward the bigger, rarer packs instead of the plain +5
+  const r = Math.random();
+  if(r < 0.30) return BLADE_PACKS[3]; // +20
+  if(r < 0.65) return BLADE_PACKS[2]; // +15
+  return BLADE_PACKS[1];              // +10
+}
+
 function pickTier(){
   const total = SWORD_TIERS.reduce((s,t)=>s+t.weight,0);
   let r = Math.random()*total;
@@ -359,6 +399,7 @@ function pickTier(){
   return SWORD_TIERS[0];
 }
 function expForLevel(lv){ return Math.round(6 + lv*4.5 + lv*lv*0.35); }
+function computePoints(level, kills, timeSurvived){ return Math.round(level*50 + kills*10 + Math.floor(timeSurvived/3)); }
 function rand(a,b){ return a + Math.random()*(b-a); }
 function dist2(ax,ay,bx,by){ const dx=ax-bx, dy=ay-by; return dx*dx+dy*dy; }
 function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
@@ -430,6 +471,14 @@ function playBlood(){
 function playPoison(){ playTone(260, 0.25, "triangle", 0.12, 150); }
 function playHeal(){ playTone(500, 0.16, "sine", 0.14, 780); setTimeout(()=>playTone(700,0.18,"sine",0.12,1000), 100); }
 function playSkillGet(){ playTone(600, 0.1, "sine", 0.13, 1100); setTimeout(()=>playTone(900,0.12,"sine",0.1,1400), 80); }
+function playBossRoar(){
+  playTone(90, 0.5, "sawtooth", 0.22, 45);
+  setTimeout(()=>playTone(70, 0.4, "sawtooth", 0.18, 35), 150);
+}
+function playBossDeath(){
+  playTone(250, 0.3, "sawtooth", 0.2, 700);
+  setTimeout(()=>playTone(150, 0.5, "sawtooth", 0.2, 40), 150);
+}
 
 /* ================= CANVAS ================= */
 const canvas = document.getElementById("game");
@@ -501,6 +550,7 @@ let player = null;
 let creeps = [];
 let pickups = [];
 let skillOrbs = [];
+let bladePacks = [];
 let particles = [];
 let floaters = []; // floating damage/exp text
 
@@ -557,6 +607,16 @@ function addSword(p, tier){
   }
   p.bonusDmgMult += 0.02;
   return false;
+}
+
+function addBladePack(p, pack){
+  const tier = tierByKey(pack.tierKey);
+  const room = MAX_SWORDS - p.swords.length;
+  const toAdd = Math.min(room, pack.amount);
+  for(let i=0;i<toAdd;i++) p.swords.push({ ...tier });
+  const leftover = pack.amount - toAdd;
+  if(leftover > 0) p.bonusDmgMult += leftover*0.015; // full already — excess becomes a permanent damage bonus
+  return { added:toAdd, leftover, tier };
 }
 
 /* ---------- Skills ---------- */
@@ -732,6 +792,34 @@ function updateSkillPickups(){
   }
 }
 
+/* ---------- Blade Pack pickups (rare, adds several blades at once) ---------- */
+function spawnBladePackAmbient(dt){
+  state.bladePackTimer = (state.bladePackTimer||rand(30,45)) - dt;
+  if(state.bladePackTimer<=0){
+    state.bladePackTimer = rand(50,80);
+    if(bladePacks.length < 2){
+      bladePacks.push({
+        x: clamp(player.x+rand(-1200,1200), 40, world.w-40),
+        y: clamp(player.y+rand(-1200,1200), 40, world.h-40),
+        pack: pickBladePack(),
+        id: uid(),
+      });
+    }
+  }
+}
+function updateBladePackPickups(){
+  for(let i=bladePacks.length-1;i>=0;i--){
+    const bp = bladePacks[i];
+    if(dist2(bp.x,bp.y,player.x,player.y) < (player.radius+18)*(player.radius+18)){
+      const result = addBladePack(player, bp.pack);
+      spawnFloater(bp.x, bp.y, "+"+result.added+" Blade!", bp.pack.color);
+      showBanner("⚔ +"+bp.pack.amount+" BLADE PACK!");
+      playPickup();
+      bladePacks.splice(i,1);
+    }
+  }
+}
+
 function gainExp(p, amount, x, y){
   p.exp += amount;
   spawnFloater(x, y, "+"+amount+" exp", "#63e6ff");
@@ -800,6 +888,44 @@ function updateCreepSpawning(dt){
     spawnTimer = interval;
     if(creeps.length < MAX_CREEPS) spawnCreep();
   }
+}
+
+/* ---------- Boss ---------- */
+const BOSS_FIRST_AT = 60;   // seconds
+const BOSS_INTERVAL = 90;   // seconds between bosses, once the previous one is dead
+let nextBossAt = BOSS_FIRST_AT;
+function spawnBoss(){
+  const margin = 80;
+  const edge = Math.floor(rand(0,4));
+  let x,y;
+  if(edge===0){ x = clamp(player.x + rand(-700,700), margin, world.w-margin); y = margin; }
+  else if(edge===1){ x = world.w-margin; y = clamp(player.y + rand(-700,700), margin, world.h-margin); }
+  else if(edge===2){ x = clamp(player.x + rand(-700,700), margin, world.w-margin); y = world.h-margin; }
+  else { x = margin; y = clamp(player.y + rand(-700,700), margin, world.h-margin); }
+
+  const t = elapsed;
+  const hpScale = 1 + t/70;
+  creeps.push({
+    id: uid(), x, y,
+    radius: 44,
+    hp: 420*hpScale, maxHp: 420*hpScale,
+    dmg: 24*(1+t/110),
+    speed: rand(55,72),
+    expValue: 140,
+    boss: true, brute:false,
+    name: BOSS_NAMES[Math.floor(rand(0,BOSS_NAMES.length))],
+    hitTimers: {},
+    lastTouch: -9999,
+  });
+  showBanner("⚠ "+ (creeps[creeps.length-1].name) +" MUNCUL!");
+  playBossRoar();
+}
+const BOSS_NAMES = ["Raja Gasing", "Momok Bilah", "Sang Penggiling", "Iblis Baja"];
+function updateBossSpawning(dt){
+  if(elapsed < nextBossAt) return;
+  const bossAlive = creeps.some(c=>c.boss && c.hp>0);
+  if(bossAlive) return; // only one boss at a time — wait it out; nextBossAt reschedules when it dies (see killCreep)
+  spawnBoss();
 }
 
 function updateCreeps(dt){
@@ -878,6 +1004,17 @@ function killCreep(c){
   c.hp = 0;
   gainExp(player, c.expValue, c.x, c.y);
   kills++;
+  if(c.boss){
+    showBanner("💀 "+c.name+" TUMBANG!");
+    playBossDeath();
+    nextBossAt = elapsed + BOSS_INTERVAL; // schedule the next one from the moment this one falls
+    // guaranteed juicy reward: a blade pack (skewed toward the good tiers) + a couple of extra sword pickups
+    bladePacks.push({ x:c.x, y:c.y, pack: pickBossBladePack(), id: uid() });
+    for(let i=0;i<3;i++){
+      pickups.push({ x:c.x+rand(-40,40), y:c.y+rand(-40,40), tier: weightedBruteTier(), id: uid() });
+    }
+    return;
+  }
   const dropChance = c.brute? 0.85 : 0.22;
   if(Math.random() < dropChance){
     pickups.push({ x:c.x+rand(-10,10), y:c.y+rand(-10,10), tier: c.brute? weightedBruteTier() : pickTier(), id: uid() });
@@ -1048,12 +1185,14 @@ function loop(t){
   updatePlayerMovement(dt);
   player.spinAngle += spinSpeed(player)*dt;
 
-  // both modes: local creeps, pickups & skill orbs give every player something to farm
+  // both modes: local creeps, pickups, skill orbs & blade packs give every player something to farm
   updateCreepSpawning(dt);
+  updateBossSpawning(dt);
   updateCreeps(dt);
   trySwordHits(player, true);
   spawnPickupsAmbient(dt);
   spawnSkillOrbsAmbient(dt);
+  spawnBladePackAmbient(dt);
 
   if(mode==="multiplayer"){
     broadcastState();
@@ -1062,6 +1201,7 @@ function loop(t){
   }
   updatePickups();
   updateSkillPickups();
+  updateBladePackPickups();
   updatePassiveSkills();
   updateSkillEffects(dt);
   if(creeps.length){ creeps = creeps.filter(c=>c.hp>0); } // sweep out anything killed this frame (swords/skills/despawn) so spawning never stalls
@@ -1119,6 +1259,7 @@ function render(){
   for(const z of poisonZones) drawPoisonZone(z);
   for(const pu of pickups) drawPickup(pu);
   for(const orb of skillOrbs) drawSkillOrb(orb);
+  for(const bp of bladePacks) drawBladePack(bp);
   for(const c of creeps) if(c.hp>0) drawCreep(c);
 
   if(mode==="multiplayer"){
@@ -1144,6 +1285,27 @@ function drawSkillOrb(orb){
   ctx.lineWidth=2; ctx.strokeStyle="rgba(255,255,255,0.6)"; ctx.stroke();
   ctx.font="14px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
   ctx.fillStyle="#0b0d14"; ctx.fillText(def.icon, s.x, s.y+bob+1);
+  ctx.textBaseline="alphabetic";
+}
+
+function drawBladePack(bp){
+  const s = worldToScreen(bp.x,bp.y);
+  if(s.x<-50||s.x>canvas.width+50||s.y<-50||s.y>canvas.height+50) return;
+  const bob = Math.sin(performance.now()/260 + bp.x)*5;
+  const cy = s.y+bob;
+  // little fan of blades behind the badge
+  for(let i=0;i<3;i++){
+    const ang = -0.5 + i*0.5 + performance.now()/900;
+    drawSwordShape(s.x+Math.cos(ang)*10, cy+Math.sin(ang)*10, ang, bp.pack.color, 20);
+  }
+  ctx.beginPath();
+  ctx.arc(s.x, cy, 17, 0, Math.PI*2);
+  ctx.fillStyle = "#0b0d14"; ctx.fill();
+  ctx.lineWidth=3; ctx.strokeStyle = bp.pack.color; ctx.shadowColor = bp.pack.color; ctx.shadowBlur = 16;
+  ctx.stroke(); ctx.shadowBlur = 0;
+  ctx.font="bold 12px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
+  ctx.fillStyle = bp.pack.color;
+  ctx.fillText("+"+bp.pack.amount, s.x, cy+1);
   ctx.textBaseline="alphabetic";
 }
 
@@ -1277,7 +1439,8 @@ function drawRemotePlayer(rp){
 
 function drawCreep(c){
   const s = worldToScreen(c.x,c.y);
-  if(s.x<-60||s.x>canvas.width+60||s.y<-60||s.y>canvas.height+60) return;
+  if(s.x<-90||s.x>canvas.width+90||s.y<-90||s.y>canvas.height+90) return;
+  if(c.boss){ drawBoss(c, s); return; }
   ctx.beginPath(); ctx.arc(s.x,s.y,c.radius,0,Math.PI*2);
   ctx.fillStyle = c.brute? "#a13b3b" : "#5c6b8a";
   ctx.fill();
@@ -1285,6 +1448,34 @@ function drawCreep(c){
   const bw=c.radius*2, bh=4;
   ctx.fillStyle="rgba(0,0,0,0.5)"; ctx.fillRect(s.x-bw/2, s.y-c.radius-10, bw, bh);
   ctx.fillStyle="#ff5b5b"; ctx.fillRect(s.x-bw/2, s.y-c.radius-10, bw*clamp(c.hp/c.maxHp,0,1), bh);
+}
+
+function drawBoss(c, s){
+  const pulse = 1 + Math.sin(performance.now()/220)*0.06;
+  // pulsing dark-red aura
+  ctx.beginPath();
+  ctx.arc(s.x, s.y, c.radius*pulse*1.35, 0, Math.PI*2);
+  ctx.fillStyle = "rgba(200,20,40,0.18)";
+  ctx.fill();
+  // spiky body — a jagged star instead of a plain circle, reads as way more threatening
+  const spikes = 10;
+  ctx.beginPath();
+  for(let i=0;i<spikes*2;i++){
+    const ang = (i/(spikes*2))*Math.PI*2;
+    const r = c.radius*pulse*(i%2===0 ? 1 : 0.78);
+    const px = s.x+Math.cos(ang)*r, py = s.y+Math.sin(ang)*r;
+    if(i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
+  }
+  ctx.closePath();
+  ctx.fillStyle = "#5a0d1a";
+  ctx.shadowColor = "#ff2d4d"; ctx.shadowBlur = 22;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.lineWidth = 3; ctx.strokeStyle = "#ff5b6d"; ctx.stroke();
+  // eyes
+  ctx.fillStyle = "#ffd43b";
+  ctx.beginPath(); ctx.arc(s.x-10, s.y-4, 4, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(s.x+10, s.y-4, 4, 0, Math.PI*2); ctx.fill();
 }
 
 function drawPickup(pu){
@@ -1329,6 +1520,16 @@ function updateHUD(){
   }
 
   updateSkillBarUI();
+  updateBossBarUI();
+}
+
+function updateBossBarUI(){
+  const box = document.getElementById("bossbar");
+  const boss = creeps.find(c=>c.boss && c.hp>0);
+  if(!boss){ box.classList.add("hidden"); return; }
+  box.classList.remove("hidden");
+  document.getElementById("bossName").textContent = boss.name+" — "+Math.max(0,Math.ceil(boss.hp))+" / "+boss.maxHp;
+  document.getElementById("bossbar-fill").style.width = clamp(boss.hp/boss.maxHp,0,1)*100+"%";
 }
 
 const skillSlotEls = [0,1,2].map(i=>document.querySelector(`.skillslot[data-slot="${i}"]`));
@@ -1374,10 +1575,10 @@ function startGame(selMode){
   world = selMode==="survival"? {w:4000,h:4000} : {w:2400,h:2400};
   player = newPlayer();
   player.x = world.w/2; player.y = world.h/2;
-  creeps = []; pickups = []; skillOrbs = []; particles = []; floaters = [];
+  creeps = []; pickups = []; skillOrbs = []; bladePacks = []; particles = []; floaters = [];
   lightnings = []; novaEffects = []; poisonZones = [];
   Object.keys(state).forEach(k=>delete state[k]);
-  elapsed = 0; kills = 0; spawnTimer = 0; resultsShown = false;
+  elapsed = 0; kills = 0; spawnTimer = 0; resultsShown = false; nextBossAt = BOSS_FIRST_AT;
   remotePlayers.clear();
 
   document.getElementById("menu").classList.add("hidden");
@@ -1405,6 +1606,7 @@ function onPlayerDeath(){
   document.getElementById("resTime").textContent = fmtTime(elapsed);
   document.getElementById("resLevel").textContent = player.level;
   document.getElementById("resKills").textContent = kills;
+  document.getElementById("resPoints").textContent = computePoints(player.level, kills, Math.floor(elapsed));
   document.getElementById("scoreStatus").textContent = "";
   document.getElementById("results").classList.remove("hidden");
   document.getElementById("hud").classList.add("hidden");
@@ -1522,14 +1724,13 @@ async function loadLeaderboard(){
   if(!sb){ box.innerHTML = '<div class="lb-empty">Supabase tidak tersedia.</div>'; return; }
   try{
     const { data, error } = await sb.from("bladewar_scores")
-      .select("name,level,time_survived,kills")
-      .order("level", {ascending:false})
-      .order("time_survived", {ascending:false})
+      .select("name,level,time_survived,kills,score")
+      .order("score", {ascending:false})
       .limit(10);
     if(error) throw error;
     if(!data || data.length===0){ box.innerHTML = '<div class="lb-empty">Belum ada skor. Jadilah yang pertama!</div>'; return; }
     box.innerHTML = data.map((row,i)=>
-      `<div class="lb-row"><span>${i+1}.</span><span style="flex:1">${escapeHtml(row.name)}</span><span>Lv${row.level} · ${fmtTime(row.time_survived)}</span></div>`
+      `<div class="lb-row"><span>${i+1}.</span><span style="flex:1">${escapeHtml(row.name)}</span><span>Lv${row.level} · ${fmtTime(row.time_survived)} · <b>${row.score ?? 0} pt</b></span></div>`
     ).join("");
   }catch(e){
     console.warn("leaderboard load failed", e);
