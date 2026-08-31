@@ -182,6 +182,22 @@
   .dot{ display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:5px; background:#666; }
   .dot.ok{ background:#51cf66; }
   .dot.bad{ background:#ff5b5b; }
+
+  /* ---------- Exit ---------- */
+  #exitBtn{
+    position:absolute; top:14px; left:50%; transform:translateX(-50%); z-index:7;
+    background: rgba(15,17,28,0.7); border:1px solid #2b3050; border-radius:10px;
+    padding:9px 16px; font-size:12px; font-weight:700; color:var(--text-dim); cursor:pointer;
+    font-family:inherit;
+  }
+  #exitBtn:hover{ color:var(--text); border-color:var(--accent-2); }
+  #exitModal{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    background: rgba(5,6,10,0.85); z-index:25;
+  }
+  .exit-card{ background:var(--panel); border:1px solid #2b3050; border-radius:16px; padding:26px 28px; width:min(340px,90vw); text-align:center; }
+  .exit-card h3{ margin:0 0 8px; font-size:18px; }
+  .exit-card p{ margin:0 0 6px; font-size:13px; color:var(--text-dim); line-height:1.4; }
 </style>
 </head>
 <body>
@@ -244,6 +260,17 @@
 </div>
 
 <div id="connstatus" class="hidden"><span class="dot" id="connDot"></span><span id="connText">offline</span></div>
+
+<button id="exitBtn" class="hidden">✕ Keluar</button>
+
+<div id="exitModal" class="hidden">
+  <div class="exit-card">
+    <h3>Keluar dari game?</h3>
+    <p>Progress kamu (level &amp; waktu bertahan) bakal otomatis kesimpen ke leaderboard sebelum keluar.</p>
+    <button class="btn btn-secondary" id="btnResumeGame">Lanjut Main</button>
+    <button class="btn btn-survival" id="btnConfirmExit">Simpan &amp; Keluar</button>
+  </div>
+</div>
 
 <div id="galleryModal" class="hidden">
   <div class="gallery-card">
@@ -763,20 +790,24 @@ function spawnCreep(){
   });
 }
 
+const MAX_CREEPS = 120;
+const CREEP_DESPAWN_RADIUS = 2200; // recycle creeps left far behind so the simulation never grows unbounded during endless play
 let spawnTimer = 0;
 function updateCreepSpawning(dt){
   const interval = clamp(2.2 - elapsed/60, 0.35, 2.2);
   spawnTimer -= dt;
   if(spawnTimer <= 0){
     spawnTimer = interval;
-    if(creeps.length < 90) spawnCreep();
+    if(creeps.length < MAX_CREEPS) spawnCreep();
   }
 }
 
 function updateCreeps(dt){
   for(const c of creeps){
+    if(c.hp<=0) continue;
     const dx = player.x-c.x, dy = player.y-c.y;
     const d = Math.hypot(dx,dy)||1;
+    if(d > CREEP_DESPAWN_RADIUS){ c.hp = 0; continue; } // far behind — recycle it, a fresh one will spawn nearby instead
     const stopDist = c.radius + player.radius - 4; // hover just inside contact range, stays in blade sweep zone
     if(d > stopDist){
       c.x += dx/d*c.speed*dt;
@@ -790,7 +821,9 @@ function updateCreeps(dt){
   }
   // light mutual separation so creeps don't stack exactly on top of each other
   for(let i=0;i<creeps.length;i++){
+    if(creeps[i].hp<=0) continue;
     for(let j=i+1;j<creeps.length;j++){
+      if(creeps[j].hp<=0) continue;
       const a=creeps[i], b=creeps[j];
       const dx=b.x-a.x, dy=b.y-a.y;
       const d = Math.hypot(dx,dy)||0.01;
@@ -1031,6 +1064,7 @@ function loop(t){
   updateSkillPickups();
   updatePassiveSkills();
   updateSkillEffects(dt);
+  if(creeps.length){ creeps = creeps.filter(c=>c.hp>0); } // sweep out anything killed this frame (swords/skills/despawn) so spawning never stalls
   updateFloaters(dt);
 
   camera.x = player.x;
@@ -1350,6 +1384,8 @@ function startGame(selMode){
   document.getElementById("results").classList.add("hidden");
   document.getElementById("hud").classList.remove("hidden");
   document.getElementById("skillbar").classList.remove("hidden");
+  document.getElementById("exitBtn").classList.remove("hidden");
+  document.getElementById("exitModal").classList.add("hidden");
 
   if(selMode==="multiplayer"){ connectMultiplayer(); }
   else { document.getElementById("connstatus").classList.add("hidden"); }
@@ -1373,9 +1409,44 @@ function onPlayerDeath(){
   document.getElementById("results").classList.remove("hidden");
   document.getElementById("hud").classList.add("hidden");
   document.getElementById("skillbar").classList.add("hidden");
+  document.getElementById("exitBtn").classList.add("hidden");
   if(mode==="multiplayer") disconnectMultiplayer();
   if(mode==="survival") submitScore(); // auto-kirim skor, progress tertinggi per player_id yang kesimpen
 }
+
+/* ================= EXIT / PAUSE ================= */
+function exitToMenu(){
+  document.getElementById("hud").classList.add("hidden");
+  document.getElementById("skillbar").classList.add("hidden");
+  document.getElementById("exitBtn").classList.add("hidden");
+  document.getElementById("exitModal").classList.add("hidden");
+  document.getElementById("connstatus").classList.add("hidden");
+  document.getElementById("results").classList.add("hidden");
+  document.getElementById("menu").classList.remove("hidden");
+  loadLeaderboard();
+}
+document.getElementById("exitBtn").addEventListener("click", ()=>{
+  if(!running) return; // already dead/paused
+  running = false; // pause the loop in place
+  document.getElementById("exitModal").classList.remove("hidden");
+});
+document.getElementById("btnResumeGame").addEventListener("click", ()=>{
+  document.getElementById("exitModal").classList.add("hidden");
+  if(!player || player.dead) return;
+  running = true; lastT = 0;
+  requestAnimationFrame(loop);
+});
+document.getElementById("btnConfirmExit").addEventListener("click", async (e)=>{
+  const btn = e.currentTarget;
+  if(mode==="survival" && player && !player.dead){
+    btn.disabled = true; btn.textContent = "Menyimpan…";
+    await submitScore(); // simpan progress sebelum keluar
+    btn.disabled = false; btn.textContent = "Simpan & Keluar";
+  }
+  document.getElementById("exitModal").classList.add("hidden");
+  if(mode==="multiplayer") disconnectMultiplayer();
+  exitToMenu();
+});
 
 /* ================= GALLERY ================= */
 function renderGallery(tab){
@@ -1421,12 +1492,7 @@ document.querySelectorAll(".gtab").forEach(tabEl=>{
 
 document.getElementById("btnSurvival").addEventListener("click", ()=>startGame("survival"));
 document.getElementById("btnMulti").addEventListener("click", ()=>startGame("multiplayer"));
-document.getElementById("btnBackMenu").addEventListener("click", ()=>{
-  document.getElementById("results").classList.add("hidden");
-  document.getElementById("menu").classList.remove("hidden");
-  document.getElementById("connstatus").classList.add("hidden");
-  loadLeaderboard();
-});
+document.getElementById("btnBackMenu").addEventListener("click", exitToMenu);
 
 async function submitScore(){
   const statusEl = document.getElementById("scoreStatus");
