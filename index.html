@@ -1,329 +1,3112 @@
--- Bladewar setup (v2) — buat project Supabase BARU yang di-share sama game lain
--- (mis. Mancing Mania): https://riugacrmejboxnpcawpd.supabase.co
---
--- PENTING:
---   * Login/akun (auth.users) DIPAKAI BARENG sama game lain di project ini — jangan diubah/dihapus.
---   * Tapi SEMUA tabel & function di bawah ini punya nama sendiri (akhiran _bladewar), jadi
---     sama sekali nggak nyentuh/nabrak tabel yang dipakai game lain.
---   * Aman dijalankan ulang (semua pakai "if not exists" / "create or replace").
---   * FIX (penting): semua policy SELECT di bawah sekarang berlaku buat role "anon" MAUPUN
---     "authenticated" — sebelumnya cuma "anon", jadi pemain yang udah login (role-nya jadi
---     "authenticated" di Supabase) nggak kebaca sama sekali oleh RLS dan leaderboard/riwayat
---     main-nya keliatan kosong padahal datanya ada di tabel.
---
--- Jalankan seluruh isi file ini di: Supabase Dashboard -> SQL Editor -> New query -> Run.
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Bladewar</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20rx='14'%20fill='%2312141f'/%3E%3Cdefs%3E%3ClinearGradient%20id='g'%20x1='0'%20y1='-26'%20x2='0'%20y2='26'%20gradientUnits='userSpaceOnUse'%3E%3Cstop%20offset='0'%20stop-color='%23ffd43b'/%3E%3Cstop%20offset='0.5'%20stop-color='%23ff9b4d'/%3E%3Cstop%20offset='1'%20stop-color='%23ff5b5b'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cg%20transform='translate(32,32)%20rotate(45)'%3E%3Cpath%20d='M0,-26%20L4,-9%20L4,-4%20L9,-4%20L9,0%20L3,0%20L3,20%20L5,23%20L0,26%20L-5,23%20L-3,20%20L-3,0%20L-9,0%20L-9,-4%20L-4,-4%20L-4,-9%20Z'%20fill='url(%23g)'%20stroke='%23331100'%20stroke-width='1'/%3E%3C/g%3E%3C/svg%3E">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+  :root{
+    color-scheme: dark;
+    --bg: #0b0d14;
+    --panel: #151826;
+    --panel-2: #1d2137;
+    --accent: #ff5b5b;
+    --accent-2: #4dabf7;
+    --text: #e9ecf5;
+    --text-dim: #8b90a8;
+    --common: #c7ccd8;
+    --rare: #4dabf7;
+    --epic: #b563ff;
+    --legendary: #ffa94d;
+  }
+  *{ box-sizing: border-box; }
+  html,body{
+    margin:0; padding:0; width:100%; height:100%;
+    background: var(--bg); color: var(--text);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    overflow: hidden; overscroll-behavior: none;
+  }
+  #game{ position:absolute; inset:0; display:block; touch-action:none; background: var(--bg); }
 
--- ============================================================================
--- 1) LEADERBOARD (mode Survival / single player)
--- ============================================================================
-create table if not exists public.leaderboard_bladewar (
-  id bigint generated always as identity primary key,
-  player_id text not null,      -- uuid akun (auth.users.id) kalau login, atau id lokal device kalau Tamu
-  name text not null default 'Player',
-  level integer not null default 1,
-  time_survived integer not null default 0,
-  kills integer not null default 0,
-  score bigint not null default 0,
-  created_at timestamptz not null default now()
-);
-create unique index if not exists leaderboard_bladewar_player_id_key
-  on public.leaderboard_bladewar (player_id);
-create index if not exists leaderboard_bladewar_score_idx
-  on public.leaderboard_bladewar (score desc);
+  .hidden{ display:none !important; }
 
-alter table public.leaderboard_bladewar enable row level security;
+  /* ---------- Menu ---------- */
+  .app-screen{
+    position:absolute; inset:0; overflow-y:auto; z-index: 10;
+    background: radial-gradient(ellipse at 50% 30%, #1a1f33 0%, #05060a 100%);
+  }
+  .poster-bg{ position:absolute; inset:0; width:100%; height:100%; z-index:0; pointer-events:none; }
+  .menu-wrap{
+    position:relative; z-index:1; display:flex; flex-wrap:wrap; gap:22px;
+    max-width:1180px; width:100%; margin:0 auto; padding: 40px 20px 60px; justify-content:center;
+  }
+  .menu-col{ display:flex; flex-direction:column; gap:18px; flex:1 1 300px; min-width:280px; max-width:400px; }
 
-drop policy if exists "leaderboard_bladewar_select_anon" on public.leaderboard_bladewar;
-create policy "leaderboard_bladewar_select_anon"
-  on public.leaderboard_bladewar for select to anon, authenticated using (true);
+  .menu-card{
+    background: rgba(21,24,38,0.9); border: 1px solid #2b3050; border-radius: 16px;
+    padding: 32px 32px; width: min(400px, 92vw); flex-shrink:0; backdrop-filter: blur(6px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5); align-self:flex-start;
+  }
+  .title{
+    font-size: 40px; font-weight: 800; text-align:center; letter-spacing: 2px;
+    background: linear-gradient(135deg, #ff5b5b, #ffa94d);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    margin: 0 0 4px 0;
+  }
+  .title::before{ content:"⚔ "; -webkit-text-fill-color:#ffa94d; }
+  .subtitle{ text-align:center; color: var(--text-dim); font-size: 13px; margin-bottom: 22px; }
+  label{ font-size: 12px; color: var(--text-dim); display:block; margin: 14px 0 6px; }
+  input[type=text], input[type=email], input[type=password]{
+    width:100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #333955;
+    background: #0f111c; color: var(--text); font-size: 14px; outline: none;
+  }
+  input[type=text]:focus, input[type=email]:focus, input[type=password]:focus{ border-color: var(--accent-2); }
+  .btn{
+    width:100%; padding: 12px 14px; border-radius: 10px; border: none; cursor:pointer;
+    font-size: 15px; font-weight: 700; margin-top: 12px; transition: transform .1s, filter .15s;
+    color: #0b0d14;
+  }
+  .btn:active{ transform: scale(0.98); }
+  .btn-survival{ background: linear-gradient(135deg, #6bffb0, #26d07c); }
+  .btn-mp{ background: linear-gradient(135deg, #7db8ff, #4d7dff); }
+  .btn-secondary{ background: #262b45; color: var(--text); }
+  .btn:hover{ filter: brightness(1.08); }
+  .row{ display:flex; gap:10px; }
+  .row > *{ flex:1; }
 
--- insert/update HANYA lewat function submit_leaderboard_bladewar di bawah (security definer),
--- jadi nggak perlu policy insert/update terpisah buat anon di sini.
+  .mode-toggle{ display:flex; gap:8px; }
+  .mode-btn{
+    flex:1; padding:10px 8px; border-radius:10px; border:1px solid #333955; background:#171a2b;
+    color:var(--text-dim); font-weight:700; font-size:12.5px; cursor:pointer; font-family:inherit;
+  }
+  .mode-btn.active{ background:#262b45; color:var(--text); border-color:var(--accent-2); }
 
--- submit skor: player_id yang sama cuma nimpa baris lama KALAU skor barunya lebih tinggi.
--- Formula poin (harus sama persis dengan computePoints() di client):
---   poin = level*50 + kills*10 + floor(waktu_bertahan_detik/3)
-create or replace function public.submit_leaderboard_bladewar(
-  p_player_id text,
-  p_name text,
-  p_level integer,
-  p_time integer,
-  p_kills integer
-) returns void
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  new_score bigint := greatest(p_level,1)::bigint * 50
-                    + greatest(p_kills,0)::bigint * 10
-                    + floor(least(greatest(p_time,0), 999999) / 3)::bigint;
-begin
-  insert into public.leaderboard_bladewar (player_id, name, level, time_survived, kills, score)
-  values (
-    p_player_id,
-    left(coalesce(p_name,'Player'), 20),
-    greatest(p_level,1),
-    greatest(p_time,0),
-    greatest(p_kills,0),
-    new_score
-  )
-  on conflict (player_id) do update
-    set name = excluded.name,
-        level = excluded.level,
-        time_survived = excluded.time_survived,
-        kills = excluded.kills,
-        score = excluded.score,
-        created_at = now()
-    where excluded.score > public.leaderboard_bladewar.score;
-end;
-$$;
-grant execute on function public.submit_leaderboard_bladewar(text,text,integer,integer,integer) to anon;
+  #leaderboard, .side-panel{
+    background: rgba(21,24,38,0.88); border:1px solid #2b3050; border-radius: 16px;
+    padding: 20px 20px; backdrop-filter: blur(6px); box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+    display:flex; flex-direction:column; max-height:420px;
+  }
+  #leaderboard h3, .side-panel h3{
+    margin: 0 0 12px; font-size: 13px; color: var(--text-dim); font-weight:700; letter-spacing:.5px; text-transform:uppercase;
+  }
+  .panel-body{ overflow-y:auto; flex:1; padding-right:2px; }
+  .lb-row{ display:flex; justify-content:space-between; font-size: 13px; padding: 6px 0; color: var(--text); }
+  .lb-row span:first-child{ color: var(--text-dim); width: 24px; display:inline-block;}
+  .lb-empty{ font-size:12px; color:var(--text-dim); }
+  .room-row{
+    display:flex; justify-content:space-between; align-items:center; font-size:13px; padding:10px 12px;
+    margin-bottom:8px; border-radius:10px; background:#171a2b; border:1px solid #262b45; cursor:pointer;
+  }
+  .room-row:hover{ border-color:var(--accent-2); background:#1d2138; }
+  .room-row .room-meta{ font-size:11px; color:var(--text-dim); }
+  .panel-title-row{ display:flex; justify-content:space-between; align-items:center; }
+  .icon-btn{
+    background:none; border:1px solid #333955; border-radius:8px; color:var(--text-dim);
+    font-size:13px; padding:2px 8px; cursor:pointer; font-family:inherit;
+  }
+  .icon-btn:hover{ color:var(--text); border-color:var(--accent-2); }
+  .auth-field{ display:flex; flex-direction:column; }
+  .profile-avatar{
+    width:64px; height:64px; border-radius:50%; margin:4px auto 12px; display:flex; align-items:center; justify-content:center;
+    font-size:26px; font-weight:800; color:#0b0d14; background: linear-gradient(135deg, #ff5b5b, #ffa94d);
+    box-shadow: 0 8px 20px rgba(255,91,91,0.3);
+  }
+  #playModal{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    background: rgba(5,6,10,0.85); z-index:22; overflow-y:auto;
+  }
 
--- ============================================================================
--- 2) MATCH HISTORY (ditampilkan di halaman Profil — "Riwayat Main")
--- ============================================================================
-create table if not exists public.match_history_bladewar (
-  id bigint generated always as identity primary key,
-  player_id text not null,
-  mode text not null default 'survival',   -- 'survival' | 'multiplayer'
-  level integer not null default 1,
-  time_survived integer not null default 0,
-  kills integer not null default 0,
-  points integer not null default 0,
-  created_at timestamptz not null default now()
-);
-create index if not exists match_history_bladewar_player_idx
-  on public.match_history_bladewar (player_id, created_at desc);
+  /* ---------- HUD ---------- */
+  #hud{ position:absolute; inset:0; pointer-events:none; z-index:5; }
+  #topbar{
+    position:absolute; top:14px; left:14px; right:14px; display:flex; justify-content:space-between; align-items:flex-start;
+  }
+  #statpanel{
+    background: rgba(15,17,28,0.7); border:1px solid #2b3050; border-radius:12px; padding:10px 14px; min-width:220px;
+  }
+  #hpbar-outer, #expbar-outer{
+    width:100%; height:10px; border-radius:6px; background:#20233a; overflow:hidden; margin-top:4px;
+  }
+  #hpbar{ height:100%; background: linear-gradient(90deg,#ff5b5b,#ff9b5b); width:100%; }
+  #expbar{ height:100%; background: linear-gradient(90deg,#4dabf7,#63e6ff); width:0%; }
+  .stat-line{ display:flex; justify-content:space-between; font-size:12px; color:var(--text-dim); margin-top:8px; }
+  .stat-line b{ color: var(--text); font-weight:700; }
 
-alter table public.match_history_bladewar enable row level security;
+  #timerbox{
+    background: rgba(15,17,28,0.7); border:1px solid #2b3050; border-radius:12px; padding:10px 16px; text-align:center; font-size:20px; font-weight:800;
+  }
+  #timerbox small{ display:block; font-size:10px; color:var(--text-dim); font-weight:500; }
+  #hudWave{ color:#ffa94d !important; font-weight:800; margin-top:2px; }
 
-drop policy if exists "match_history_bladewar_select_anon" on public.match_history_bladewar;
-create policy "match_history_bladewar_select_anon"
-  on public.match_history_bladewar for select to anon, authenticated using (true);
+  #roster{
+    width:170px; background: rgba(15,17,28,0.7); border:1px solid #2b3050; border-radius:12px; padding:10px 12px;
+    max-height: 220px; overflow:hidden; flex-shrink:0;
+  }
+  #roster h4{ margin:0 0 6px; font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.5px;}
+  .roster-row{ font-size:12px; display:flex; justify-content:space-between; padding:2px 0; }
 
-create or replace function public.log_match_bladewar(
-  p_player_id text,
-  p_name text,
-  p_mode text,
-  p_level integer,
-  p_time integer,
-  p_kills integer
-) returns void
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  pts bigint := greatest(p_level,1)::bigint * 50
-              + greatest(p_kills,0)::bigint * 10
-              + floor(least(greatest(p_time,0), 999999) / 3)::bigint;
-begin
-  insert into public.match_history_bladewar (player_id, mode, level, time_survived, kills, points)
-  values (p_player_id, coalesce(p_mode,'survival'), greatest(p_level,1), greatest(p_time,0), greatest(p_kills,0), pts);
-end;
-$$;
-grant execute on function public.log_match_bladewar(text,text,text,integer,integer,integer) to anon;
+  #banner{
+    position:absolute; top:80px; left:50%; transform:translateX(-50%);
+    font-size: 22px; font-weight:800; color:#ffd43b; text-shadow: 0 2px 10px rgba(0,0,0,.6);
+    opacity:0; transition: opacity .3s, transform .3s; pointer-events:none;
+  }
 
--- ============================================================================
--- 3) ROOMS (multiplayer) — room punya baris beneran di database: waktu mulai (shared timer),
---    siapa pembuatnya, boss apa aja yang udah tumbang, statistik tiap pemain, dan dipakai buat
---    nampilin "daftar room aktif" di layar Multiplayer (berapa orang main & udah menit keberapa).
--- ============================================================================
-create table if not exists public.rooms_bladewar (
-  room_code text primary key,
-  created_at timestamptz not null default now(),
-  created_by text,
-  last_active_at timestamptz not null default now(),
-  ended_at timestamptz,
-  bosses_defeated jsonb not null default '[]'::jsonb
-);
+  #bossbar{
+    position:absolute; top:64px; left:50%; transform:translateX(-50%); width:min(440px,80vw);
+  }
+  #bossName{
+    text-align:center; font-size:13px; font-weight:800; color:#ff5b6d; letter-spacing:1px;
+    text-shadow:0 2px 8px rgba(0,0,0,.7); margin-bottom:3px;
+  }
+  #bossbar-outer{
+    width:100%; height:12px; border-radius:7px; background:#20233a; overflow:hidden;
+    border:1px solid rgba(255,91,109,0.5);
+  }
+  #bossbar-fill{ height:100%; background: linear-gradient(90deg,#8b0000,#ff2d4d); width:100%; transition:width .15s; }
 
-create table if not exists public.room_players_bladewar (
-  room_code text not null references public.rooms_bladewar(room_code) on delete cascade,
-  player_id text not null,
-  name text not null default 'Player',
-  kills integer not null default 0,
-  deaths integer not null default 0,
-  points integer not null default 0,
-  level integer not null default 1,
-  last_seen timestamptz not null default now(),
-  primary key (room_code, player_id)
-);
--- kalau tabel ini udah ada dari versi sebelumnya (sebelum kolom level ditambahin)
-alter table public.room_players_bladewar add column if not exists level integer not null default 1;
+  #minimap-box{
+    position:absolute; left:14px; bottom:64px; width:140px; height:140px;
+    background: rgba(15,17,28,0.68); border:1px solid #2b3050; border-radius:10px;
+    padding:4px; box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  }
+  #minimap{ display:block; width:100%; height:100%; border-radius:6px; }
 
-alter table public.rooms_bladewar enable row level security;
-alter table public.room_players_bladewar enable row level security;
+  #chatBox{
+    position:absolute; left:50%; bottom:14px; width:260px; transform:translateX(-50%); pointer-events:auto;
+    background: rgba(15,17,28,0.72); border:1px solid #2b3050; border-radius:10px;
+    padding:8px; box-shadow: 0 4px 16px rgba(0,0,0,0.4); display:flex; flex-direction:column; gap:6px;
+    transition: background .25s ease;
+  }
+  #chatLog{
+    max-height:110px; overflow-y:auto; font-size:11px; line-height:1.4; display:flex; flex-direction:column; gap:2px;
+    transition: max-height .3s ease;
+    -webkit-mask-image: linear-gradient(to bottom, transparent, black 22px, black 100%);
+    mask-image: linear-gradient(to bottom, transparent, black 22px, black 100%);
+  }
+  #chatLog .chat-line b{ color:#8be9ff; }
+  #chatLog .chat-line.me b{ color:#ffd43b; }
+  /* idle state: card shrinks down to just a peek of the last line, fading upward — expands again
+     the moment you focus the input or a new message comes in (see chatExpand()/chatCollapse()) */
+  #chatBox.chat-collapsed{ background: rgba(15,17,28,0.4); }
+  #chatBox.chat-collapsed #chatLog{ max-height:20px; }
+  #chatForm{ display:flex; gap:6px; }
+  #chatInput{
+    flex:1; min-width:0; background:#12141f; border:1px solid #2b3050; border-radius:6px;
+    color:var(--text); font-size:11px; padding:5px 7px;
+  }
+  #chatForm button{
+    background:#3a4270; border:none; border-radius:6px; color:#fff; font-size:11px; padding:5px 9px; cursor:pointer;
+  }
 
-drop policy if exists "rooms_bladewar_select_anon" on public.rooms_bladewar;
-create policy "rooms_bladewar_select_anon" on public.rooms_bladewar for select to anon, authenticated using (true);
+  #joystick-zone{ position:absolute; left:0; bottom:0; width:45%; height:45%; z-index:6; }
+  #joystick-base{
+    position:absolute; width:110px; height:110px; border-radius:50%; background: rgba(255,255,255,0.07);
+    border: 2px solid rgba(255,255,255,0.15); display:none;
+  }
+  #joystick-stick{
+    position:absolute; width:50px; height:50px; border-radius:50%; background: rgba(255,255,255,0.25);
+    border: 2px solid rgba(255,255,255,0.4);
+  }
 
-drop policy if exists "room_players_bladewar_select_anon" on public.room_players_bladewar;
-create policy "room_players_bladewar_select_anon" on public.room_players_bladewar for select to anon, authenticated using (true);
+  #skillbar{
+    position:absolute; right:18px; bottom:18px; display:flex; gap:12px; z-index:6; pointer-events:none;
+  }
+  .skillslot{
+    position:relative; width:58px; height:58px; border-radius:16px;
+    background: rgba(15,17,28,0.75); border:2px solid #333955;
+    display:flex; align-items:center; justify-content:center;
+    font-size:26px; user-select:none; -webkit-user-select:none;
+  }
+  .skillslot.ready{ border-color: rgba(255,255,255,0.5); }
+  .skillslot.empty{ opacity:0.45; font-size:20px; color:var(--text-dim); }
+  .skill-cd{
+    position:absolute; inset:0; border-radius:14px; background: rgba(0,0,0,0.65);
+    display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:800;
+    color:#fff; pointer-events:none;
+  }
+  .skill-cd:empty{ display:none; }
 
--- room_join_or_create_bladewar: dipanggil begitu masuk sebuah room (klik "Buat Room Baru" atau
--- klik salah satu room di daftar "Room Aktif"). Room baru -> pemanggil jadi "pembuat". Room yang
--- udah ada -> ikut gabung tanpa mengubah created_at, biar timer/wave/boss semua pemain nyambung
--- dari waktu yang sama. Room yang udah lama kosong (15 menit tanpa heartbeat) otomatis ditutup.
-create or replace function public.room_join_or_create_bladewar(
-  p_room text,
-  p_player_id text,
-  p_name text
-) returns jsonb
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  r public.rooms_bladewar;
-  is_new boolean := false;
-begin
-  select * into r from public.rooms_bladewar where room_code = p_room for update;
+  /* ---------- Results ---------- */
+  #results{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background: rgba(5,6,10,0.85); z-index:20;
+  }
+  #roomSummaryModal{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background: rgba(5,6,10,0.85); z-index:30;
+  }
+  .result-card{ background: var(--panel); border:1px solid #2b3050; border-radius:16px; padding:30px 34px; width:min(380px,90vw); text-align:center;}
+  .result-card h2{ margin:0 0 4px; font-size:26px; }
+  .result-card .sub{ color:var(--text-dim); font-size:13px; margin-bottom:18px;}
+  .result-stats{ display:flex; justify-content:space-around; margin: 18px 0; }
+  .result-stats div{ font-size:18px; font-weight:800; }
+  .result-stats span{ display:block; font-size:11px; color:var(--text-dim); font-weight:500; margin-top:2px;}
 
-  if not found then
-    insert into public.rooms_bladewar (room_code, created_by)
-    values (p_room, p_player_id)
-    returning * into r;
-    is_new := true;
-  end if;
+  /* ---------- Gallery items (used inline in the side panels on the menu) ---------- */
+  .gitem{
+    display:flex; gap:10px; padding:10px; border-radius:12px; background:#171a2b; margin-bottom:8px;
+    border-left:4px solid #444;
+  }
+  .gitem-icon{
+    width:34px; height:34px; border-radius:9px; flex-shrink:0; display:flex; align-items:center; justify-content:center;
+    font-size:17px; font-weight:800; background:#0f111c;
+  }
+  .gitem-body h4{ margin:0 0 3px; font-size:13px; }
+  .gitem-body .meta{ font-size:10.5px; color:var(--text-dim); margin-bottom:3px; }
+  .gitem-body p{ margin:0; font-size:11.5px; color:#c3c7db; line-height:1.35; }
 
-  if not is_new and r.ended_at is null and r.last_active_at < now() - interval '15 minutes' then
-    update public.rooms_bladewar set ended_at = now() where room_code = p_room
-      returning * into r;
-  end if;
+  #connstatus{
+    position:absolute; bottom:214px; left:14px; font-size:11px; color: var(--text-dim);
+    background: rgba(15,17,28,0.6); padding:5px 10px; border-radius:8px; border:1px solid #2b3050;
+  }
+  .dot{ display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:5px; background:#666; }
+  .dot.ok{ background:#51cf66; }
+  .dot.bad{ background:#ff5b5b; }
 
-  if r.ended_at is null then
-    update public.rooms_bladewar set last_active_at = now() where room_code = p_room;
-    insert into public.room_players_bladewar (room_code, player_id, name)
-    values (p_room, p_player_id, left(coalesce(p_name,'Player'), 20))
-    on conflict (room_code, player_id) do update
-      set name = excluded.name, last_seen = now();
-  end if;
+  /* ---------- Exit ---------- */
+  #exitBtn{
+    position:absolute; left:14px; bottom:14px; z-index:7;
+    background: rgba(15,17,28,0.7); border:1px solid #2b3050; border-radius:10px;
+    padding:9px 16px; font-size:12px; font-weight:700; color:var(--text-dim); cursor:pointer;
+    font-family:inherit;
+  }
+  #exitBtn:hover{ color:var(--text); border-color:var(--accent-2); }
+  #exitModal{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    background: rgba(5,6,10,0.85); z-index:25;
+  }
+  .exit-card{ background:var(--panel); border:1px solid #2b3050; border-radius:16px; padding:26px 28px; width:min(340px,90vw); text-align:center; }
+  .exit-card h3{ margin:0 0 8px; font-size:18px; }
+  .exit-card p{ margin:0 0 6px; font-size:13px; color:var(--text-dim); line-height:1.4; }
+</style>
+</head>
+<body>
 
-  return jsonb_build_object(
-    'room_code', r.room_code,
-    'created_at', r.created_at,
-    'created_by', r.created_by,
-    'ended_at', r.ended_at,
-    'bosses_defeated', r.bosses_defeated
+<canvas id="game"></canvas>
+
+<svg style="display:none;">
+  <defs id="posterDefs">
+    <linearGradient id="swordGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd43b"/>
+      <stop offset="0.5" stop-color="#ff9b4d"/>
+      <stop offset="1" stop-color="#ff5b5b"/>
+    </linearGradient>
+    <radialGradient id="posterGlow" cx="50%" cy="38%" r="60%">
+      <stop offset="0" stop-color="#3a2550" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#05060a" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+</svg>
+
+<template id="posterBgTpl"><svg class="poster-bg" viewBox="0 0 800 800" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+  <rect width="800" height="800" fill="url(#posterGlow)"/>
+  <g transform="translate(400,380)" opacity="0.15">
+    <g transform="rotate(45)"><path d="M0,-320 L26,-110 L26,-46 L58,-46 L58,-14 L20,-14 L20,230 L34,258 L0,300 L-34,258 L-20,230 L-20,-14 L-58,-14 L-58,-46 L-26,-46 L-26,-110 Z" fill="url(#swordGrad)"/></g>
+    <g transform="rotate(-45)"><path d="M0,-320 L26,-110 L26,-46 L58,-46 L58,-14 L20,-14 L20,230 L34,258 L0,300 L-34,258 L-20,230 L-20,-14 L-58,-14 L-58,-46 L-26,-46 L-26,-110 Z" fill="url(#swordGrad)"/></g>
+  </g>
+</svg></template>
+
+<!-- ================= SCREEN 1: login / signup / guest ================= -->
+<div id="authScreen" class="app-screen">
+  <div class="menu-wrap">
+    <div class="menu-card">
+      <div class="title">BLADEWAR</div>
+      <div class="subtitle">Masuk buat nyimpen progress &amp; muncul di leaderboard, atau langsung main sebagai tamu.</div>
+      <div class="mode-toggle">
+        <button type="button" class="mode-btn active" id="tabLogin">Masuk</button>
+        <button type="button" class="mode-btn" id="tabSignup">Buat Akun</button>
+      </div>
+      <form id="authForm" novalidate>
+        <div class="auth-field">
+          <label>Username</label>
+          <input type="text" id="authEmail" placeholder="contoh: slendhun" autocomplete="username">
+        </div>
+        <div class="auth-field">
+          <label>Password</label>
+          <input type="password" id="authPassword" placeholder="Minimal 6 karakter">
+        </div>
+        <button type="submit" class="btn btn-mp" id="btnAuthSubmit">Masuk</button>
+      </form>
+      <div id="authStatus" style="text-align:center; font-size:12px; color:var(--text-dim); margin-top:10px; min-height:16px;"></div>
+      <div style="display:flex; align-items:center; gap:10px; margin:16px 0;">
+        <div style="flex:1;height:1px;background:#2b3050;"></div>
+        <span style="font-size:11px;color:var(--text-dim);">atau</span>
+        <div style="flex:1;height:1px;background:#2b3050;"></div>
+      </div>
+      <button type="button" class="btn btn-secondary" id="btnGuestPlay">▶ Main sebagai Tamu (langsung main, tanpa isi apa-apa)</button>
+    </div>
+    <div class="menu-col">
+      <div class="side-panel">
+        <h3>Musuh</h3>
+        <div id="enemyGallery" class="panel-body"></div>
+      </div>
+    </div>
+    <div class="menu-col">
+      <div class="side-panel" style="margin-bottom:18px;">
+        <h3>Pedang</h3>
+        <div id="swordGallery" class="panel-body"></div>
+      </div>
+      <div class="side-panel">
+        <h3>Skill</h3>
+        <div id="skillGallery" class="panel-body"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SCREEN 2: profile (avatar+name card, match history & top survival to the right) ================= -->
+<div id="profileScreen" class="app-screen hidden">
+  <div class="menu-wrap">
+    <div class="menu-card">
+      <div class="title">BLADEWAR</div>
+      <div class="profile-avatar" id="profileAvatar">?</div>
+      <div class="subtitle" id="profileName" style="margin-bottom:2px;">Player</div>
+      <div class="sub" id="profileEmail" style="text-align:center; color:var(--text-dim); font-size:12px; margin-bottom:14px;"></div>
+      <button class="btn btn-mp" id="btnOpenPlay">▶ Main</button>
+      <button class="btn btn-secondary" id="btnLogout">Keluar Akun</button>
+    </div>
+    <div class="menu-col">
+      <div class="side-panel">
+        <h3>Riwayat Main</h3>
+        <div id="matchHistoryList" class="panel-body"><div class="lb-empty">Memuat…</div></div>
+      </div>
+      <div id="leaderboard">
+        <h3>Top Survival</h3>
+        <div id="lbList" class="panel-body"><div class="lb-empty">Memuat…</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= POPUP: Main (Survival / Multiplayer + room list) ================= -->
+<div id="playModal" class="hidden">
+  <div class="menu-wrap" style="justify-content:center; padding-top:24px; padding-bottom:24px;">
+    <div class="menu-card">
+      <div class="panel-title-row">
+        <div class="title" style="margin:0;">Main</div>
+        <button type="button" class="icon-btn" id="btnClosePlayModal">✕</button>
+      </div>
+      <div class="subtitle" id="playModalGreeting">Halo!</div>
+      <button class="btn btn-survival" id="btnGoSurvival">⚔ Survival (Single Player)</button>
+      <div style="display:flex; align-items:center; gap:10px; margin:16px 0;">
+        <div style="flex:1;height:1px;background:#2b3050;"></div>
+        <span style="font-size:11px;color:var(--text-dim);">Multiplayer</span>
+        <div style="flex:1;height:1px;background:#2b3050;"></div>
+      </div>
+      <label>Mode Kamu</label>
+      <div class="mode-toggle">
+        <button type="button" class="mode-btn active" id="btnModeVersus">⚔ Saling Lawan</button>
+        <button type="button" class="mode-btn" id="btnModeCoop">🤝 Berteman</button>
+      </div>
+      <button class="btn btn-mp" id="btnCreateRoom" style="margin-top:14px;">➕ Buat Room Baru</button>
+    </div>
+    <div class="menu-col" style="flex:1.3 1 340px; max-width:460px;">
+      <div class="side-panel" style="max-height:none;">
+        <div class="panel-title-row"><h3 style="margin:0;">Room Aktif</h3><button type="button" class="icon-btn" id="btnRefreshRooms">⟳ Refresh</button></div>
+        <div id="roomList" class="panel-body" style="max-height:420px; margin-top:10px;"><div class="lb-empty">Memuat…</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="hud" class="hidden">
+  <div id="topbar">
+    <div id="statpanel">
+      <div style="display:flex; justify-content:space-between; align-items:baseline;">
+        <b id="hudName" style="font-size:14px;">Player</b>
+        <span id="hudLevel" style="font-size:12px; color:var(--text-dim);">Lv 1</span>
+      </div>
+      <div id="hpbar-outer"><div id="hpbar"></div></div>
+      <div id="expbar-outer"><div id="expbar"></div></div>
+      <div class="stat-line"><span>Pedang</span><b id="hudSwords">0</b></div>
+      <div class="stat-line"><span>Kills</span><b id="hudKills">0</b></div>
+    </div>
+    <div id="timerbox"><span id="hudTimer">00:00</span><small id="hudMode">SURVIVAL</small><small id="hudWave">Gelombang 1</small></div>
+    <div id="roster" class="hidden">
+      <h4>Arena</h4>
+      <div id="rosterList"></div>
+    </div>
+  </div>
+  <div id="bossbar" class="hidden">
+    <div id="bossName">Boss</div>
+    <div id="bossbar-outer"><div id="bossbar-fill"></div></div>
+  </div>
+  <div id="banner"></div>
+  <div id="minimap-box">
+    <canvas id="minimap" width="140" height="140"></canvas>
+  </div>
+  <div id="chatBox" class="hidden">
+    <div id="chatLog"></div>
+    <form id="chatForm" autocomplete="off">
+      <input id="chatInput" type="text" maxlength="80" placeholder="Chat ke tim…" />
+      <button type="submit">Kirim</button>
+    </form>
+  </div>
+</div>
+
+<div id="joystick-zone" class="hidden">
+  <div id="joystick-base"><div id="joystick-stick"></div></div>
+</div>
+
+<div id="skillbar" class="hidden">
+  <div class="skillslot" data-slot="0"><span class="skill-icon">?</span><div class="skill-cd"></div></div>
+  <div class="skillslot" data-slot="1"><span class="skill-icon">?</span><div class="skill-cd"></div></div>
+  <div class="skillslot" data-slot="2"><span class="skill-icon">?</span><div class="skill-cd"></div></div>
+</div>
+
+<div id="connstatus" class="hidden"><span class="dot" id="connDot"></span><span id="connText">offline</span></div>
+
+<button id="exitBtn" class="hidden">✕ Keluar</button>
+
+<div id="exitModal" class="hidden">
+  <div class="exit-card">
+    <h3>Keluar dari game?</h3>
+    <p>Progress kamu (level &amp; waktu bertahan) bakal otomatis kesimpen ke leaderboard sebelum keluar.</p>
+    <div id="roomControls" class="hidden" style="margin:4px 0 12px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.12);">
+      <p style="font-size:12px; color:var(--text-dim); margin:0 0 8px;">Kamu pembuat room ini. Akhiri buat nutup room ini permanen dan langsung tampilin rekap ke semua yang lagi main.</p>
+      <button class="btn btn-secondary" id="btnEndRoom">🏁 Akhiri Room</button>
+    </div>
+    <button class="btn btn-secondary" id="btnResumeGame">Lanjut Main</button>
+    <button class="btn btn-survival" id="btnConfirmExit">Simpan &amp; Keluar</button>
+  </div>
+</div>
+
+<div id="results" class="hidden">
+  <div class="result-card">
+    <h2 id="resTitle">Kamu Tumbang!</h2>
+    <div class="sub" id="resSub">Bertahan cukup lama juga.</div>
+    <div class="result-stats">
+      <div><span id="resTime">00:00</span><span>Waktu</span></div>
+      <div><span id="resLevel">1</span><span>Level</span></div>
+      <div><span id="resKills">0</span><span>Kills</span></div>
+      <div><span id="resPoints">0</span><span>Poin</span></div>
+    </div>
+    <div class="sub" id="scoreStatus" style="min-height:16px;"></div>
+    <button class="btn btn-survival hidden" id="btnRespawnRoom">Main Lagi</button>
+    <button class="btn btn-secondary" id="btnBackMenu">Kembali ke Menu</button>
+  </div>
+</div>
+
+<div id="roomSummaryModal" class="hidden">
+  <div class="exit-card" style="max-width:440px;">
+    <h3>🏁 Rekap Room</h3>
+    <div class="sub" id="roomSummarySub">Room sudah berakhir.</div>
+    <div id="roomSummaryBosses" style="margin:12px 0; font-size:13px; line-height:1.5;"></div>
+    <div id="roomSummaryPlayers" style="max-height:240px; overflow-y:auto; margin:0 0 14px;"></div>
+    <button class="btn btn-secondary" id="btnCloseRoomSummary">Kembali ke Menu</button>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* ================= CONFIG ================= */
+// Project Supabase yang sama dengan game lain (mis. Mancing Mania) — kita cuma numpang tabel
+// auth.users-nya (login/akun sama), tapi SEMUA tabel Bladewar di bawah punya nama sendiri
+// (akhiran _bladewar) jadi nggak nyenggol tabel game lain sama sekali.
+const SUPABASE_URL = "https://riugacrmejboxnpcawpd.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJpdWdhY3JtZWpib3hucGNhd3BkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgwNDI1ODYsImV4cCI6MjEwMzYxODU4Nn0.hh5xE1FGm8uqiunj9dkSnU-7Sai7g6hIepq_9Iar6LA";
+let sb = null;
+try{
+  if (window.supabase && window.supabase.createClient){
+    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  }
+}catch(e){ console.warn("Supabase init failed", e); }
+
+// stamp the reusable poster-background art (sword logo glow) onto every full-screen panel
+document.querySelectorAll(".app-screen").forEach(scr=>{
+  const tpl = document.getElementById("posterBgTpl");
+  if(tpl) scr.insertAdjacentHTML("afterbegin", tpl.innerHTML);
+});
+
+/* ================= AUTH / SESSION ================= */
+// authUser: null while logged out/guest, else { id, email, name } from Supabase Auth.
+// Kalau login: identitas dipakai buat leaderboard/room adalah authUser.id (uuid Supabase Auth).
+// Kalau tamu: tetap pakai getPersistentPlayerId() lokal seperti sebelumnya, authUser tetap null.
+let authUser = null;
+let authMode = "login"; // "login" | "signup" — toggled by the tab buttons
+let isGuest = false;
+
+const SWORD_TIERS = [
+  { key:"common",    label:"Common",        color:"#c7ccd8", dmg:3,  weight:48, lifesteal:0,
+    desc:"Pedang dasar yang gampang ditemuin di mana-mana. Damage standar." },
+  { key:"rare",      label:"Rare",          color:"#4dabf7", dmg:6,  weight:27, lifesteal:0,
+    desc:"Lebih tajam dari pedang biasa, damage lumayan gede." },
+  { key:"epic",      label:"Epic",          color:"#b563ff", dmg:11, weight:11, lifesteal:0,
+    desc:"Pedang langka dengan damage besar dan aura ungu yang keren." },
+  { key:"legendary", label:"Legendary",     color:"#ffa94d", dmg:20, weight:3,  lifesteal:0,
+    desc:"Pedang terkuat di arena. Damage paling gede, jarang banget nemunya." },
+  { key:"vampiric",  label:"Vampiric Fang", color:"#ff2d78", dmg:9,  weight:9,  lifesteal:0.22,
+    desc:"Setiap serangan yang kena musuh langsung menyembuhkan sebagian HP kamu (lifesteal 22%). Cocok buat bertahan lama." },
+];
+const MAX_SWORDS = 20;
+const GROW_UNTIL = 10; // freely add swords until this many; after that, only upgrade if stronger than your weakest
+const HIT_COOLDOWN = 260; // ms, per sword-vs-target
+const PLAYER_IFRAME = 500; // ms invulnerability after hit
+const BASE_ORBIT_RADIUS = 46;
+const ORBIT_RADIUS_PER_SWORD = 3.2;
+const BASE_SPIN_SPEED = 2.6; // rad/s
+const SPIN_SPEED_PER_LEVEL = 0.045;
+const SWORD_VISUAL_LEN = 34;
+const BLADE_HALF_WIDTH = 11;
+const MAX_SKILL_SLOTS = 3;
+
+// "Swordsman" creeps: a special enemy that carries its own orbiting blade(s), can grab field
+// sword pickups to power up, and duels blade-to-blade with the player (weaker blade breaks).
+const SWORDSMAN_MAX_SWORDS = 6;
+const SWORDSMAN_PICKUP_RANGE = 260;
+const CLASH_COOLDOWN = 260; // ms, per creep — how often a blade-vs-blade clash can resolve
+
+const SKILLS = [
+  { key:"electric", label:"Petir",  icon:"⚡", color:"#4dd8ff",
+    desc:"Otomatis nyamber hingga 4 musuh terdekat di sekitarmu setiap 7 detik.",
+    cooldown: 7000, baseDmg: 16, range: 560, maxTargets: 4 },
+  { key:"blood", label:"Darah", icon:"🩸", color:"#ff4d6d",
+    desc:"Otomatis meledak setiap 10 detik — menghantam semua musuh dekat dan menyembuhkan HP-mu sebesar setengah damage yang dihasilkan.",
+    cooldown: 10000, baseDmg: 9, radius: 150, lifestealPct: 0.5 },
+  { key:"poison", label:"Racun", icon:"☠", color:"#7bd93a",
+    desc:"Otomatis nyiptain awan racun di bawah kakimu setiap 9 detik. Musuh yang berdiri di dalamnya kena damage terus-menerus.",
+    cooldown: 9000, tickDmg: 4, duration: 4000, radius: 115, tickEvery: 500 },
+  { key:"heal", label:"Heal", icon:"✚", color:"#51cf66",
+    desc:"Otomatis mulihin sebagian besar HP-mu setiap 12 detik. Sustain pasif buat bertahan lebih lama.",
+    cooldown: 12000, healPct: 0.35 },
+  { key:"knockback", label:"Hentak", icon:"🌀", color:"#8be9ff",
+    desc:"Otomatis menghentak semua musuh di sekitarmu menjauh secara melingkar setiap 9 detik. Bagus buat ngasih jarak pas dikepung.",
+    cooldown: 9000, radius: 210, force: 240 },
+];
+function skillByKey(key){ return SKILLS.find(s=>s.key===key); }
+function skillLevelMult(level){ return 1 + (level-1)*0.25; } // +25% effect per level (max lvl 5 => +100%)
+
+// Blade Pack power-ups: rare field drops that add a bunch of blades at once (up to the 20-blade cap).
+// Bigger packs are rarer AND come with better-quality blades.
+const BLADE_PACKS = [
+  { amount:5,  tierKey:"common",    color:"#c7ccd8", weight:48 },
+  { amount:10, tierKey:"rare",      color:"#4dabf7", weight:28 },
+  { amount:15, tierKey:"epic",      color:"#b563ff", weight:16 },
+  { amount:20, tierKey:"legendary", color:"#ffa94d", weight:8  },
+];
+function pickBladePack(){
+  const total = BLADE_PACKS.reduce((s,b)=>s+b.weight,0);
+  let r = Math.random()*total;
+  for(const b of BLADE_PACKS){ if(r < b.weight) return b; r -= b.weight; }
+  return BLADE_PACKS[0];
+}
+function pickBossBladePack(){
+  // boss reward — skewed toward the bigger, rarer packs instead of the plain +5
+  const r = Math.random();
+  if(r < 0.30) return BLADE_PACKS[3]; // +20
+  if(r < 0.65) return BLADE_PACKS[2]; // +15
+  return BLADE_PACKS[1];              // +10
+}
+
+function pickTier(){
+  const total = SWORD_TIERS.reduce((s,t)=>s+t.weight,0);
+  let r = Math.random()*total;
+  for(const t of SWORD_TIERS){ if(r < t.weight) return t; r -= t.weight; }
+  return SWORD_TIERS[0];
+}
+function expForLevel(lv){ return Math.round(6 + lv*4.5 + lv*lv*0.35); }
+function computePoints(level, kills, timeSurvived){ return Math.round(level*50 + kills*10 + Math.floor(timeSurvived/3)); }
+function rand(a,b){ return a + Math.random()*(b-a); }
+function dist2(ax,ay,bx,by){ const dx=ax-bx, dy=ay-by; return dx*dx+dy*dy; }
+function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+function fmtTime(s){
+  s = Math.max(0, Math.floor(s));
+  const m = Math.floor(s/60), sec = s%60;
+  return String(m).padStart(2,"0")+":"+String(sec).padStart(2,"0");
+}
+function uid(){ return Math.random().toString(36).slice(2)+Date.now().toString(36); }
+function pointSegDist(px,py,x1,y1,x2,y2){
+  const dx=x2-x1, dy=y2-y1;
+  const lenSq = dx*dx+dy*dy;
+  let t = lenSq>0 ? ((px-x1)*dx+(py-y1)*dy)/lenSq : 0;
+  t = clamp(t,0,1);
+  const cx = x1+t*dx, cy = y1+t*dy;
+  return Math.hypot(px-cx, py-cy);
+}
+function colorForId(id){
+  let h=0; for(let i=0;i<id.length;i++) h = (h*31 + id.charCodeAt(i))>>>0;
+  return `hsl(${h%360} 70% 60%)`;
+}
+// cheap segment-vs-segment distance approximation (min of endpoint-to-opposite-segment checks) —
+// good enough for short blade-length segments like ours
+function segSegDist(x1,y1,x2,y2,x3,y3,x4,y4){
+  return Math.min(
+    pointSegDist(x1,y1,x3,y3,x4,y4),
+    pointSegDist(x2,y2,x3,y3,x4,y4),
+    pointSegDist(x3,y3,x1,y1,x2,y2),
+    pointSegDist(x4,y4,x1,y1,x2,y2)
   );
-end;
-$$;
-grant execute on function public.room_join_or_create_bladewar(text,text,text) to anon;
+}
+function swordSegment(cx,cy,angle,R){
+  return [
+    cx + Math.cos(angle)*(R-SWORD_VISUAL_LEN*0.5), cy + Math.sin(angle)*(R-SWORD_VISUAL_LEN*0.5),
+    cx + Math.cos(angle)*(R+SWORD_VISUAL_LEN*0.6), cy + Math.sin(angle)*(R+SWORD_VISUAL_LEN*0.6),
+  ];
+}
 
--- room_bump_stats_bladewar: nambahin delta kill/mati/poin (atomic) + nyimpen level pemain saat ini,
--- SEKALIGUS dipanggil terus-menerus tiap beberapa detik sebagai "heartbeat" (walau delta-nya nol) —
--- ini yang bikin last_seen selalu fresh, jadi daftar "Room Aktif" nunjukin jumlah pemain yang
--- beneran masih main saat ini, dan level pemain tertinggi di room itu buat ditampilin di daftar.
-drop function if exists public.room_bump_stats_bladewar(text,text,text,integer,integer,integer);
-create or replace function public.room_bump_stats_bladewar(
-  p_room text,
-  p_player_id text,
-  p_name text,
-  p_dkills integer default 0,
-  p_ddeaths integer default 0,
-  p_dpoints integer default 0,
-  p_level integer default 1
-) returns void
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  update public.rooms_bladewar
-    set last_active_at = now()
-    where room_code = p_room and ended_at is null;
+/* ================= AUDIO (procedural, no external files needed) ================= */
+let actx = null;
+function ensureAudio(){
+  try{
+    if(!actx) actx = new (window.AudioContext||window.webkitAudioContext)();
+    if(actx.state === "suspended") actx.resume();
+  }catch(e){ /* audio not available, game still works */ }
+}
+function playTone(freq, duration, type, gainStart, glideTo){
+  if(!actx) return;
+  try{
+    const t0 = actx.currentTime;
+    const osc = actx.createOscillator();
+    const gain = actx.createGain();
+    osc.type = type || "sine";
+    osc.frequency.setValueAtTime(freq, t0);
+    if(glideTo) osc.frequency.exponentialRampToValueAtTime(Math.max(1,glideTo), t0+duration);
+    gain.gain.setValueAtTime(gainStart||0.15, t0);
+    gain.gain.exponentialRampToValueAtTime(0.001, t0+duration);
+    osc.connect(gain); gain.connect(actx.destination);
+    osc.start(t0); osc.stop(t0+duration);
+  }catch(e){}
+}
+let lastClangAt = 0;
+function playClang(){
+  const now = performance.now();
+  if(now - lastClangAt < 70) return; // throttle so many simultaneous hits don't distort
+  lastClangAt = now;
+  playTone(rand(650,950), 0.07, "square", 0.10);
+  playTone(rand(1500,2000), 0.05, "triangle", 0.05);
+}
+function playPickup(){ playTone(520, 0.09, "sine", 0.12, 1000); }
+function playLevelUp(){
+  playTone(520, 0.14, "sine", 0.15, 900);
+  setTimeout(()=>playTone(780, 0.2, "sine", 0.15, 1300), 90);
+}
+function playHurt(){ playTone(160, 0.15, "sawtooth", 0.14, 70); }
+function playDeath(){ playTone(320, 0.6, "sawtooth", 0.18, 50); }
+function playZap(){
+  playTone(rand(1000,1400), 0.1, "sawtooth", 0.13, 200);
+  playTone(rand(2000,2600), 0.06, "square", 0.06);
+}
+function playBlood(){
+  playTone(180, 0.22, "sawtooth", 0.16, 90);
+  playTone(320, 0.18, "sine", 0.1, 140);
+}
+function playPoison(){ playTone(260, 0.25, "triangle", 0.12, 150); }
+function playKnockback(){
+  playTone(140, 0.18, "sine", 0.18, 300);
+  setTimeout(()=>playTone(90, 0.22, "sine", 0.14, 180), 60);
+}
+function playHeal(){ playTone(500, 0.16, "sine", 0.14, 780); setTimeout(()=>playTone(700,0.18,"sine",0.12,1000), 100); }
+function playSkillGet(){ playTone(600, 0.1, "sine", 0.13, 1100); setTimeout(()=>playTone(900,0.12,"sine",0.1,1400), 80); }
+function playBossRoar(){
+  playTone(90, 0.5, "sawtooth", 0.22, 45);
+  setTimeout(()=>playTone(70, 0.4, "sawtooth", 0.18, 35), 150);
+}
+function playBossDeath(){
+  playTone(250, 0.3, "sawtooth", 0.2, 700);
+  setTimeout(()=>playTone(150, 0.5, "sawtooth", 0.2, 40), 150);
+}
+function playWaveUp(){
+  playTone(440, 0.14, "square", 0.14, 900);
+  setTimeout(()=>playTone(560, 0.14, "square", 0.14, 1100), 110);
+  setTimeout(()=>playTone(700, 0.2, "square", 0.16, 1300), 220);
+}
 
-  insert into public.room_players_bladewar (room_code, player_id, name, kills, deaths, points, level, last_seen)
-  values (p_room, p_player_id, left(coalesce(p_name,'Player'), 20), greatest(p_dkills,0), greatest(p_ddeaths,0), greatest(p_dpoints,0), greatest(p_level,1), now())
-  on conflict (room_code, player_id) do update
-    set name = excluded.name,
-        kills = public.room_players_bladewar.kills + greatest(p_dkills,0),
-        deaths = public.room_players_bladewar.deaths + greatest(p_ddeaths,0),
-        points = public.room_players_bladewar.points + greatest(p_dpoints,0),
-        level = greatest(p_level,1),
-        last_seen = now();
-end;
-$$;
-grant execute on function public.room_bump_stats_bladewar(text,text,text,integer,integer,integer,integer) to anon;
+/* ================= CANVAS ================= */
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+function resize(){ canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+window.addEventListener("resize", resize); resize();
 
--- room_add_boss_bladewar: dicatet sekali tiap boss (shared) tumbang, buat rekap akhir room.
-create or replace function public.room_add_boss_bladewar(
-  p_room text,
-  p_boss_name text
-) returns void
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  update public.rooms_bladewar
-    set bosses_defeated = bosses_defeated || jsonb_build_object('name', left(coalesce(p_boss_name,'Boss'), 40), 'at', now()),
-        last_active_at = now()
-    where room_code = p_room and ended_at is null;
-end;
-$$;
-grant execute on function public.room_add_boss_bladewar(text,text) to anon;
+const minimapCanvas = document.getElementById("minimap");
+const mctx = minimapCanvas.getContext("2d");
 
--- room_end_bladewar: cuma pembuat room yang boleh manggil ini buat nutup room permanen.
-create or replace function public.room_end_bladewar(
-  p_room text,
-  p_player_id text
-) returns jsonb
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  r public.rooms_bladewar;
-begin
-  select * into r from public.rooms_bladewar where room_code = p_room for update;
-  if not found then
-    return jsonb_build_object('ok', false, 'reason', 'not_found');
-  end if;
-  if r.ended_at is not null then
-    return jsonb_build_object('ok', true, 'already_ended', true);
-  end if;
-  if r.created_by is distinct from p_player_id then
-    return jsonb_build_object('ok', false, 'reason', 'not_creator');
-  end if;
-  update public.rooms_bladewar set ended_at = now() where room_code = p_room;
-  return jsonb_build_object('ok', true);
-end;
-$$;
-grant execute on function public.room_end_bladewar(text,text) to anon;
+/* ================= INPUT ================= */
+const keys = {};
+window.addEventListener("keydown", e=>{ keys[e.key.toLowerCase()]=true; });
+window.addEventListener("keyup", e=>{ keys[e.key.toLowerCase()]=false; });
 
--- list_active_rooms_bladewar: buat popup "Main" -> daftar "Room Aktif" (klik salah satu buat
--- langsung gabung). Menunjukin udah berjalan berapa menit, berapa orang lagi main (heartbeat 25
--- detik terakhir), dan level tertinggi di antara pemain yang lagi di dalam. Sekalian nutup otomatis
--- room yang kosong 15+ menit biar nggak numpuk.
-drop function if exists public.list_active_rooms_bladewar();
-create or replace function public.list_active_rooms_bladewar()
-returns table(room_code text, elapsed_seconds integer, player_count integer, top_level integer)
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  update public.rooms_bladewar
-    set ended_at = now()
-    where ended_at is null and last_active_at < now() - interval '15 minutes';
+const joy = { active:false, dx:0, dy:0, id:null };
+const joyZone = document.getElementById("joystick-zone");
+const joyBase = document.getElementById("joystick-base");
+const joyStick = document.getElementById("joystick-stick");
+let isTouch = ("ontouchstart" in window) || navigator.maxTouchPoints > 0;
+if (isTouch){ joyZone.classList.remove("hidden"); }
 
-  return query
-    select r.room_code,
-           floor(extract(epoch from (now()-r.created_at)))::integer as elapsed_seconds,
-           (select count(*)::integer from public.room_players_bladewar rp
-              where rp.room_code = r.room_code and rp.last_seen > now() - interval '25 seconds') as player_count,
-           (select coalesce(max(rp.level),1)::integer from public.room_players_bladewar rp
-              where rp.room_code = r.room_code and rp.last_seen > now() - interval '25 seconds') as top_level
-    from public.rooms_bladewar r
-    where r.ended_at is null
-    order by r.last_active_at desc
-    limit 30;
-end;
-$$;
-grant execute on function public.list_active_rooms_bladewar() to anon;
+function joyStart(x,y,id){
+  joy.active = true; joy.id = id; joy.baseX = x; joy.baseY = y; joy.dx=0; joy.dy=0;
+  joyBase.style.display = "block";
+  joyBase.style.left = (x-55)+"px"; joyBase.style.top = (y-55)+"px";
+  joyStick.style.left = "30px"; joyStick.style.top = "30px";
+}
+function joyMove(x,y){
+  if(!joy.active) return;
+  let dx = x-joy.baseX, dy = y-joy.baseY;
+  const max = 55; const d = Math.hypot(dx,dy);
+  if(d>max){ dx = dx/d*max; dy = dy/d*max; }
+  joy.dx = dx/max; joy.dy = dy/max;
+  joyStick.style.left = (30+dx)+"px"; joyStick.style.top = (30+dy)+"px";
+}
+function joyEnd(){ joy.active=false; joy.dx=0; joy.dy=0; joyBase.style.display="none"; }
 
-create index if not exists room_players_bladewar_points_idx
-  on public.room_players_bladewar (room_code, points desc);
+joyZone.addEventListener("touchstart", e=>{
+  const t = e.changedTouches[0]; joyStart(t.clientX, t.clientY, t.identifier); e.preventDefault();
+}, {passive:false});
+joyZone.addEventListener("touchmove", e=>{
+  for(const t of e.changedTouches){ if(t.identifier===joy.id) joyMove(t.clientX,t.clientY); }
+  e.preventDefault();
+}, {passive:false});
+joyZone.addEventListener("touchend", e=>{
+  for(const t of e.changedTouches){ if(t.identifier===joy.id) joyEnd(); }
+}, {passive:false});
+
+/* ================= GAME STATE ================= */
+let mode = null; // "survival" | "multiplayer"
+let world = { w: 4000, h: 4000 };
+let running = false;
+let elapsed = 0;
+let kills = 0;
+let playerName = "Player";
+let myId = uid();
+let myColor = colorForId(myId);
+
+function getPersistentPlayerId(){
+  try{
+    let id = localStorage.getItem("bladewar_player_id");
+    if(!id){ id = uid(); localStorage.setItem("bladewar_player_id", id); }
+    return id;
+  }catch(e){
+    return "session-"+myId; // localStorage unavailable (e.g. private mode) — falls back to per-session id
+  }
+}
+// persistent identity used for leaderboard/room rows: a logged-in account uses its Supabase Auth
+// uuid (so progress follows the account across devices); a guest keeps the old local-device id.
+// Starts as the guest id and gets swapped to authUser.id once login/session-restore resolves.
+let myPlayerId = getPersistentPlayerId();
+
+let player = null;
+let creeps = [];
+let pickups = [];
+let skillOrbs = [];
+let bladePacks = [];
+let particles = [];
+let floaters = []; // floating damage/exp text
+
+let camera = { x:0, y:0 };
+let skillSeq = 0;
+let lightnings = [];   // {x1,y1,x2,y2,life,color}
+let novaEffects = [];  // {x,y,radius,maxRadius,life,maxLife,color}
+let poisonZones = [];  // {x,y,radius,expiresAt,tickDmg,tickEvery,lastCreepTick:{},lastRemoteTick:{},owner}
+
+// Multiplayer
+let channel = null;
+let roomCode = "public";
+let remotePlayers = new Map(); // id -> {x,y,name,color,level,hp,maxHp,swords,spinAngle,lastSeen}
+let lastBroadcast = 0;
+const BROADCAST_INTERVAL = 90; // ms
+let pvpMode = true; // multiplayer only: true = "Saling Lawan" (damage flows), false = "Berteman" (co-op, no PvP damage)
+
+// deterministic host election: whoever has the lexicographically smallest id, out of everyone currently
+// in the room, is the "host" — the single source of truth for shared world state (the boss, skill orb
+// spawns) so every player fights/sees the exact same thing instead of each running an independent copy.
+function currentHostId(){
+  let min = myId;
+  for(const id of remotePlayers.keys()) if(id < min) min = id;
+  return min;
+}
+function isHost(){ return mode !== "multiplayer" || currentHostId() === myId; }
+
+// Persistent "Room" state (see bladewar_setup.sql v4) — separate from the ephemeral realtime-only
+// multiplayer above, which still works on its own if Supabase is unreachable. A Room has a real row
+// in the database: a shared clock (created_at) so latecomers face the same difficulty, a permanent
+// record of which bosses got beaten, and per-player stats (kills/deaths/points) keyed by the same
+// persistent player_id already used for the survival leaderboard, so leaving and rejoining doesn't
+// lose progress.
+let roomIsActive = false;   // true once room_join_or_create succeeded for the current session
+let roomIsCreator = false;  // true if *I* created this room — only the creator can end it
+let roomEnded = false;      // true if this room was already permanently closed
+let roomStatsSnapshot = { kills:0, points:0, deaths:0 }; // last cumulative values flushed to the DB
+let deathCount = 0;         // how many times *I* have died in the current play/room session
+let lastRoomFlush = 0;
+const ROOM_FLUSH_INTERVAL = 6000; // ms
+
+function newPlayer(){
+  return {
+    x: world.w/2, y: world.h/2, vx:0, vy:0,
+    speed: 210,
+    hp: 100, maxHp: 100,
+    level: 1, exp: 0,
+    swords: [ { ...SWORD_TIERS[0] } ],
+    bonusDmgMult: 1,
+    skills: [null, null, null],
+    spinAngle: 0,
+    facing: 0,
+    lastHitAt: -9999,
+    radius: 18,
+    dead: false,
+  };
+}
+
+function orbitRadius(p){ return BASE_ORBIT_RADIUS + (p.swords.length-1)*ORBIT_RADIUS_PER_SWORD; }
+function spinSpeed(p){ return BASE_SPIN_SPEED + p.level*SPIN_SPEED_PER_LEVEL; }
+
+// swordsman creeps orbit their own (smaller, slower) blade set — independent of player leveling
+function creepOrbitRadius(c){ return 30 + (c.swords.length-1)*3; }
+function creepSpinSpeed(c){ return 2.0 + (c.swords.length-1)*0.08; }
+function creepAddSword(c, tier){
+  if(c.swords.length < SWORDSMAN_MAX_SWORDS){ c.swords.push({ ...tier }); return; }
+  let weakestIdx = 0;
+  for(let i=1;i<c.swords.length;i++) if(c.swords[i].dmg < c.swords[weakestIdx].dmg) weakestIdx = i;
+  if(tier.dmg > c.swords[weakestIdx].dmg) c.swords[weakestIdx] = { ...tier };
+}
+
+function addSword(p, tier){
+  // early game: freely grow the number of orbiting swords (the "gasing" fantasy)
+  if(p.swords.length < GROW_UNTIL){
+    p.swords.push({ ...tier });
+    return true;
+  }
+  // later: prioritize quality — a more powerful sword replaces your weakest one
+  let weakestIdx = 0;
+  for(let i=1;i<p.swords.length;i++) if(p.swords[i].dmg < p.swords[weakestIdx].dmg) weakestIdx = i;
+  if(tier.dmg > p.swords[weakestIdx].dmg){
+    const old = p.swords[weakestIdx];
+    p.swords[weakestIdx] = { ...tier };
+    return { upgraded:true, from:old, to:tier };
+  }
+  if(p.swords.length < MAX_SWORDS){
+    p.swords.push({ ...tier });
+    return true;
+  }
+  p.bonusDmgMult += 0.02;
+  return false;
+}
+
+function addBladePack(p, pack){
+  const tier = tierByKey(pack.tierKey);
+  const room = MAX_SWORDS - p.swords.length;
+  const toAdd = Math.min(room, pack.amount);
+  for(let i=0;i<toAdd;i++) p.swords.push({ ...tier });
+  const leftover = pack.amount - toAdd;
+  if(leftover > 0) p.bonusDmgMult += leftover*0.015; // full already — excess becomes a permanent damage bonus
+  return { added:toAdd, leftover, tier };
+}
+
+/* ---------- Skills ---------- */
+function addSkill(p, key){
+  const existing = p.skills.find(s=>s && s.key===key);
+  if(existing){
+    existing.level = Math.min(5, existing.level+1);
+    return { leveled:true, key, level:existing.level };
+  }
+  const emptyIdx = p.skills.findIndex(s=>!s);
+  if(emptyIdx !== -1){
+    p.skills[emptyIdx] = { key, level:1, cooldownUntil:0, seq:++skillSeq };
+    return { added:true, key, slot:emptyIdx };
+  }
+  let oldestIdx = 0;
+  for(let i=1;i<p.skills.length;i++) if(p.skills[i].seq < p.skills[oldestIdx].seq) oldestIdx = i;
+  const oldKey = p.skills[oldestIdx].key;
+  p.skills[oldestIdx] = { key, level:1, cooldownUntil:0, seq:++skillSeq };
+  return { replaced:true, key, oldKey, slot:oldestIdx };
+}
+
+function getNearbyTargets(x, y, range){
+  const list = [];
+  for(const c of creeps){
+    if(c.hp<=0) continue;
+    const d = Math.hypot(c.x-x, c.y-y);
+    if(d<=range) list.push({ type:"creep", ref:c, x:c.x, y:c.y, d });
+  }
+  if(mode==="multiplayer" && pvpMode){
+    for(const [id,rp] of remotePlayers){
+      if(rp.pvp === false) continue; // respect the other player's "Berteman" choice
+      const d = Math.hypot(rp.x-x, rp.y-y);
+      if(d<=range) list.push({ type:"remote", ref:rp, id, x:rp.x, y:rp.y, d });
+    }
+  }
+  list.sort((a,b)=>a.d-b.d);
+  return list;
+}
+
+function damageTarget(t, dmg, healOnHitPct){
+  if(t.type==="creep"){
+    const c = t.ref;
+    if(applyDamageToCreep(c, dmg)){
+      spawnFloater(c.x, c.y-c.radius, "-"+Math.round(dmg), "#ffd43b");
+      if(healOnHitPct){
+        player.hp = Math.min(player.maxHp, player.hp + dmg*healOnHitPct);
+      }
+    }
+  } else if(t.type==="remote" && channel){
+    channel.send({type:"broadcast", event:"hit", payload:{ targetId:t.id, dmg, fromId:myId }});
+    spawnFloater(t.x, t.y-20, "-"+Math.round(dmg), "#ffd43b");
+    if(healOnHitPct){
+      player.hp = Math.min(player.maxHp, player.hp + dmg*healOnHitPct);
+    }
+  }
+}
+
+function runSkillEffect(def, slot, p){
+  const mult = skillLevelMult(slot.level);
+  if(def.key === "electric"){
+    const targets = getNearbyTargets(p.x, p.y, def.range).slice(0, def.maxTargets);
+    const dmg = def.baseDmg*mult;
+    for(const t of targets){
+      lightnings.push({ x1:p.x, y1:p.y, x2:t.x, y2:t.y, life:0.22, color:def.color });
+      damageTarget(t, dmg, 0);
+    }
+    playZap();
+  } else if(def.key === "blood"){
+    const targets = getNearbyTargets(p.x, p.y, def.radius);
+    const dmg = def.baseDmg*mult;
+    novaEffects.push({ x:p.x, y:p.y, radius:10, maxRadius:def.radius, life:0.4, maxLife:0.4, color:def.color });
+    for(const t of targets){ damageTarget(t, dmg, def.lifestealPct); }
+    playBlood();
+  } else if(def.key === "poison"){
+    poisonZones.push({
+      x:p.x, y:p.y, radius:def.radius,
+      expiresAt: performance.now()+def.duration,
+      tickDmg: def.tickDmg*mult, tickEvery: def.tickEvery,
+      lastCreepTick: {}, lastRemoteTick: {},
+    });
+    playPoison();
+  } else if(def.key === "heal"){
+    const healed = p.maxHp*def.healPct*mult;
+    p.hp = Math.min(p.maxHp, p.hp + healed);
+    spawnFloater(p.x, p.y-p.radius-20, "+"+Math.round(healed), "#51cf66");
+    playHeal();
+  } else if(def.key === "knockback"){
+    const force = def.force*mult;
+    novaEffects.push({ x:p.x, y:p.y, radius:10, maxRadius:def.radius, life:0.35, maxLife:0.35, color:def.color });
+    for(const c of creeps){
+      if(c.hp<=0) continue;
+      const dx = c.x-p.x, dy = c.y-p.y;
+      const d = Math.hypot(dx,dy)||1;
+      if(d > def.radius) continue;
+      const nx = dx/d, ny = dy/d;
+      c.x = clamp(c.x + nx*force, c.radius, world.w-c.radius);
+      c.y = clamp(c.y + ny*force, c.radius, world.h-c.radius);
+      c.knockUntil = performance.now()+420; // brief stagger so the push actually reads before AI resumes
+    }
+    playKnockback();
+  }
+}
+
+// Skills are passive: each equipped skill fires itself on its own cooldown, no input needed.
+function fireSkillSlot(idx){
+  if(!running || !player || player.dead) return;
+  const slot = player.skills[idx];
+  if(!slot) return;
+  const now = performance.now();
+  if(now < slot.cooldownUntil) return;
+  const def = skillByKey(slot.key);
+  if(!def) return;
+  runSkillEffect(def, slot, player);
+  const cdReduction = Math.min(0.3, (slot.level-1)*0.08);
+  slot.cooldownUntil = now + def.cooldown*(1-cdReduction);
+}
+function updatePassiveSkills(){
+  if(!player) return;
+  for(let i=0;i<player.skills.length;i++){
+    if(player.skills[i]) fireSkillSlot(i);
+  }
+}
+
+function updateSkillEffects(dt){
+  for(let i=lightnings.length-1;i>=0;i--){ lightnings[i].life -= dt; if(lightnings[i].life<=0) lightnings.splice(i,1); }
+  for(let i=novaEffects.length-1;i>=0;i--){
+    const n = novaEffects[i];
+    n.life -= dt;
+    n.radius = n.maxRadius*(1-n.life/n.maxLife);
+    if(n.life<=0) novaEffects.splice(i,1);
+  }
+  const now = performance.now();
+  for(let i=poisonZones.length-1;i>=0;i--){
+    const z = poisonZones[i];
+    if(now > z.expiresAt){ poisonZones.splice(i,1); continue; }
+    for(const c of creeps){
+      if(c.hp<=0) continue;
+      if(Math.hypot(c.x-z.x, c.y-z.y) > z.radius+c.radius) continue;
+      const last = z.lastCreepTick[c.id] || 0;
+      if(now-last >= z.tickEvery){
+        z.lastCreepTick[c.id] = now;
+        if(applyDamageToCreep(c, z.tickDmg)){
+          spawnFloater(c.x, c.y-c.radius, "-"+Math.round(z.tickDmg), "#7bd93a");
+        }
+      }
+    }
+    if(mode==="multiplayer" && channel){
+      for(const [id,rp] of remotePlayers){
+        if(Math.hypot(rp.x-z.x, rp.y-z.y) > z.radius+16) continue;
+        const last = z.lastRemoteTick[id] || 0;
+        if(now-last >= z.tickEvery){
+          z.lastRemoteTick[id] = now;
+          channel.send({type:"broadcast", event:"hit", payload:{ targetId:id, dmg:z.tickDmg, fromId:myId }});
+          spawnFloater(rp.x, rp.y-20, "-"+Math.round(z.tickDmg), "#7bd93a");
+        }
+      }
+    }
+  }
+}
+
+/* ---------- Skill orb pickups (field only, session-only) ---------- */
+function spawnSkillOrbsAmbient(dt){
+  // orb spawning is host-authoritative in multiplayer so both players see the exact same orbs at the
+  // exact same spots, instead of two independently-rolled sets that never lined up (the reported "ga singkron")
+  if(mode==="multiplayer" && !isHost()) return;
+  state.skillOrbTimer = (state.skillOrbTimer||rand(6,10)) - dt;
+  if(state.skillOrbTimer<=0){
+    state.skillOrbTimer = rand(14,22);
+    if(skillOrbs.length < 6){
+      const orb = {
+        x: clamp(player.x+rand(-1100,1100), 40, world.w-40),
+        y: clamp(player.y+rand(-1100,1100), 40, world.h-40),
+        skillKey: SKILLS[Math.floor(rand(0,SKILLS.length))].key,
+        id: uid(),
+      };
+      skillOrbs.push(orb);
+      if(mode==="multiplayer" && channel){
+        channel.send({type:"broadcast", event:"orbSpawn", payload: orb});
+      }
+    }
+  }
+}
+function updateSkillPickups(){
+  for(let i=skillOrbs.length-1;i>=0;i--){
+    const orb = skillOrbs[i];
+    if(dist2(orb.x,orb.y,player.x,player.y) < (player.radius+16)*(player.radius+16)){
+      const def = skillByKey(orb.skillKey);
+      const result = addSkill(player, orb.skillKey);
+      if(result.leveled) spawnFloater(orb.x,orb.y, def.icon+" "+def.label+" Lv"+result.level, def.color);
+      else if(result.replaced) spawnFloater(orb.x,orb.y, "Ganti: "+def.icon+" "+def.label, def.color);
+      else spawnFloater(orb.x,orb.y, "+Skill "+def.icon+" "+def.label, def.color);
+      playSkillGet();
+      skillOrbs.splice(i,1);
+    }
+  }
+}
+
+/* ---------- Blade Pack pickups (rare, adds several blades at once) ---------- */
+function spawnBladePackAmbient(dt){
+  // host-authoritative in multiplayer, same reasoning as skill orbs — see spawnSkillOrbsAmbient
+  if(mode==="multiplayer" && !isHost()) return;
+  state.bladePackTimer = (state.bladePackTimer||rand(30,45)) - dt;
+  if(state.bladePackTimer<=0){
+    state.bladePackTimer = rand(50,80);
+    if(bladePacks.length < 2){
+      bladePacks.push({
+        x: clamp(player.x+rand(-1200,1200), 40, world.w-40),
+        y: clamp(player.y+rand(-1200,1200), 40, world.h-40),
+        pack: pickBladePack(),
+        id: uid(),
+      });
+    }
+  }
+}
+function updateBladePackPickups(){
+  for(let i=bladePacks.length-1;i>=0;i--){
+    const bp = bladePacks[i];
+    if(dist2(bp.x,bp.y,player.x,player.y) < (player.radius+18)*(player.radius+18)){
+      const result = addBladePack(player, bp.pack);
+      spawnFloater(bp.x, bp.y, "+"+result.added+" Blade!", bp.pack.color);
+      showBanner("⚔ +"+bp.pack.amount+" BLADE PACK!");
+      playPickup();
+      bladePacks.splice(i,1);
+      // tell the host so it drops this pack from the authoritative list too — otherwise it'd
+      // reappear for everyone else on the next world snapshot (the host doesn't know it's gone yet)
+      if(mode==="multiplayer" && !isHost()){
+        markJustTaken(bp.id);
+        if(channel) channel.send({type:"broadcast", event:"itemTaken", payload:{kind:"bladePack", id:bp.id}});
+      }
+    }
+  }
+}
+
+function gainExp(p, amount, x, y){
+  p.exp += amount;
+  spawnFloater(x, y, "+"+amount+" exp", "#63e6ff");
+  let needed = expForLevel(p.level);
+  while(p.exp >= needed){
+    p.exp -= needed;
+    p.level += 1;
+    p.maxHp += 10;
+    p.hp = Math.min(p.maxHp, p.hp + p.maxHp*0.3);
+    showBanner("LEVEL UP! Lv "+p.level);
+    playLevelUp();
+    needed = expForLevel(p.level);
+  }
+}
+
+function spawnFloater(x,y,text,color){
+  floaters.push({x,y,text,color, life:0.9, vy:-40});
+}
+
+let bannerTimeout = null;
+function showBanner(text){
+  const el = document.getElementById("banner");
+  el.textContent = text;
+  el.style.opacity = "1";
+  el.style.transform = "translateX(-50%) translateY(0px)";
+  clearTimeout(bannerTimeout);
+  bannerTimeout = setTimeout(()=>{ el.style.opacity="0"; }, 1400);
+}
+
+/* ---------- Waves ---------- */
+// every 3 minutes a new wave kicks in: enemies get noticeably tankier and faster on top
+// of the existing smooth time-based scaling, so the game keeps ramping up in clear steps.
+const WAVE_INTERVAL = 180; // seconds
+function currentWave(){ return Math.floor(elapsed/WAVE_INTERVAL) + 1; }
+function waveHpMult(wave){ return 1 + (wave-1)*0.4; }
+function waveSpeedMult(wave){ return Math.min(1 + (wave-1)*0.15, 2.2); } // cap so it never gets literally unplayable
+function waveDmgMult(wave){ return 1 + (wave-1)*0.2; }
+let announcedWave = 1;
+function updateWaveAnnounce(){
+  const w = currentWave();
+  if(w > announcedWave){
+    announcedWave = w;
+    showBanner("🌊 GELOMBANG "+w+"! Musuh makin ganas!");
+    playWaveUp();
+  }
+  const waveEl = document.getElementById("hudWave");
+  if(waveEl) waveEl.textContent = "Gelombang "+announcedWave;
+}
+
+/* ---------- Creeps ---------- */
+function spawnCreep(){
+  const margin = 60;
+  // spawn just outside camera view but inside world
+  let x,y;
+  const edge = Math.floor(rand(0,4));
+  if(edge===0){ x = clamp(player.x + rand(-900,900), margin, world.w-margin); y = margin; }
+  else if(edge===1){ x = world.w-margin; y = clamp(player.y + rand(-900,900), margin, world.h-margin); }
+  else if(edge===2){ x = clamp(player.x + rand(-900,900), margin, world.w-margin); y = world.h-margin; }
+  else { x = margin; y = clamp(player.y + rand(-900,900), margin, world.h-margin); }
+
+  const t = elapsed;
+  const wave = currentWave();
+  const hpScale = (1 + t/45) * waveHpMult(wave);
+  const dmgScale = (1 + t/90) * waveDmgMult(wave);
+  const spdMult = waveSpeedMult(wave);
+
+  // swordsman: a special creep that carries its own orbiting blade, hunts field pickups to
+  // power up, and can duel-clash blades with the player instead of just trading HP damage
+  const swordsmanChance = elapsed > 90 ? Math.min(0.16, elapsed/1400) : 0;
+  const swordsman = Math.random() < swordsmanChance;
+  const brute = !swordsman && elapsed > 60 && Math.random() < Math.min(0.28, elapsed/900);
+
+  if(swordsman){
+    creeps.push({
+      id: uid(), x, y,
+      radius: 17,
+      hp: 34*hpScale, maxHp: 34*hpScale,
+      dmg: 5*dmgScale, // fallback body-contact damage — its real threat is the blade
+      speed: rand(65,95)*spdMult,
+      expValue: 22,
+      swordsman: true, brute:false,
+      swords: [ { ...SWORD_TIERS[0] } ],
+      spinAngle: rand(0,Math.PI*2),
+      hitTimers: {},
+      lastClashAt: 0,
+      lastTouch: -9999,
+    });
+    return;
+  }
+
+  creeps.push({
+    id: uid(), x, y,
+    radius: brute? 26: 15,
+    hp: (brute? 60: 16) * hpScale,
+    maxHp: (brute? 60: 16) * hpScale,
+    dmg: (brute? 14: 6) * dmgScale,
+    speed: (brute? rand(50,70): rand(70,110)) * spdMult,
+    expValue: brute? 26: 6,
+    brute,
+    hitTimers: {},
+    lastTouch: -9999,
+  });
+}
+
+const MAX_CREEPS = 120;
+const MAX_CREEPS_MP = 40; // multiplayer keeps a smaller shared cap — cheaper to broadcast, and every player sees the exact same set
+const CREEP_DESPAWN_RADIUS = 2200; // recycle creeps left far behind so the simulation never grows unbounded during endless play
+let spawnTimer = 0;
+function updateCreepSpawning(dt){
+  // multiplayer: only the host spawns real creeps — everyone else just mirrors the host's list
+  // (see applyWorldSnapshot), same host-authoritative pattern already used for the boss/skill orbs.
+  if(mode==="multiplayer" && !isHost()) return;
+  const cap = mode==="multiplayer" ? MAX_CREEPS_MP : MAX_CREEPS;
+  const interval = clamp(2.2 - elapsed/60, 0.35, 2.2);
+  spawnTimer -= dt;
+  if(spawnTimer <= 0){
+    spawnTimer = interval;
+    if(creeps.length < cap) spawnCreep();
+  }
+}
+
+/* ---------- Boss ---------- */
+const BOSS_FIRST_AT = 60;   // seconds
+const BOSS_INTERVAL = 90;   // seconds between bosses, once the previous one is dead
+let nextBossAt = BOSS_FIRST_AT;
+function spawnBoss(){
+  const margin = 80;
+  const edge = Math.floor(rand(0,4));
+  let x,y;
+  if(edge===0){ x = clamp(player.x + rand(-700,700), margin, world.w-margin); y = margin; }
+  else if(edge===1){ x = world.w-margin; y = clamp(player.y + rand(-700,700), margin, world.h-margin); }
+  else if(edge===2){ x = clamp(player.x + rand(-700,700), margin, world.w-margin); y = world.h-margin; }
+  else { x = margin; y = clamp(player.y + rand(-700,700), margin, world.h-margin); }
+
+  const t = elapsed;
+  const wave = currentWave();
+  // additive (not multiplicative) scaling — two compounding growth factors made bosses
+  // explode into the thousands of HP within the first couple of waves
+  const hpScale = 1 + t/220 + (wave-1)*0.45;
+  const dmgScale = 1 + t/260 + (wave-1)*0.28;
+  const bossHp = Math.round(420*hpScale);
+  const passive = BOSS_PASSIVES[Math.floor(rand(0,BOSS_PASSIVES.length))].key;
+  const boss = {
+    id: uid(), x, y,
+    radius: 44,
+    hp: bossHp, maxHp: bossHp,
+    dmg: Math.round(24*dmgScale),
+    speed: rand(55,72)*waveSpeedMult(wave),
+    expValue: 140,
+    boss: true, brute:false,
+    name: BOSS_NAMES[Math.floor(rand(0,BOSS_NAMES.length))],
+    passive, spawnedAt: Date.now(), lastHitAt: performance.now(),
+    hitTimers: {},
+    lastTouch: -9999,
+  };
+  creeps.push(boss);
+  const pdef = BOSS_PASSIVES.find(b=>b.key===passive);
+  showBanner("⚠ "+boss.name+" MUNCUL! "+pdef.icon+" "+pdef.label);
+  playBossRoar();
+  // multiplayer: the host's boss is the one authoritative copy — broadcast it so every other
+  // player spawns a matching mirror instead of rolling their own independent boss
+  if(mode==="multiplayer" && channel){
+    channel.send({type:"broadcast", event:"bossSpawn", payload:{
+      id:boss.id, x:boss.x, y:boss.y, radius:boss.radius, hp:boss.hp, maxHp:boss.maxHp,
+      dmg:boss.dmg, speed:boss.speed, expValue:boss.expValue, name:boss.name,
+      passive:boss.passive, spawnedAt:boss.spawnedAt,
+    }});
+  }
+}
+const BOSS_NAMES = ["Raja Gasing", "Momok Bilah", "Sang Penggiling", "Iblis Baja"];
+// boss passive skills: rolled randomly at spawn time so every boss fight feels a bit different and
+// tougher than a plain damage sponge. In multiplayer the host rolls the passive and broadcasts it
+// (see spawnBoss/applyNetBossState) so both players fight the exact same boss with the exact same trait.
+const BOSS_PASSIVES = [
+  { key:"regen", label:"Regenerasi", icon:"💚", desc:"Memulihkan HP sendiri kalau tidak diserang beberapa detik." },
+  { key:"enrage", label:"Amukan", icon:"🔥", desc:"Makin cepat & makin sakit pukulannya saat HP-nya menipis." },
+  { key:"nova", label:"Gelombang Kejut", icon:"💥", desc:"Berkala melepas gelombang kejut yang melukai & mendorong siapapun di dekatnya." },
+  { key:"summon", label:"Panggilan", icon:"👹", desc:"Berkala memanggil creep tambahan buat ngeroyok kamu." },
+  { key:"shield", label:"Perisai", icon:"🛡️", desc:"Sesekali memasang perisai yang menolak semua damage sesaat." },
+];
+const BOSS_NOVA_INTERVAL = 6000, BOSS_NOVA_RADIUS = 220, BOSS_NOVA_KNOCK = 190;
+const BOSS_SUMMON_INTERVAL = 13000;
+const BOSS_SHIELD_INTERVAL = 16000, BOSS_SHIELD_DURATION = 2200;
+const BOSS_REGEN_IDLE = 4000, BOSS_REGEN_RATE = 0.02; // fraction of maxHp per second, once idle long enough
+
+function updateBossSpawning(dt){
+  // boss spawning is host-authoritative in multiplayer, so both players only ever fight ONE shared
+  // boss with matching stats/passive — guests receive it via the "bossSpawn"/"state" broadcasts instead
+  if(mode==="multiplayer" && !isHost()) return;
+  if(elapsed < nextBossAt) return;
+  const bossAlive = creeps.some(c=>c.boss && c.hp>0 && !c.netBoss);
+  if(bossAlive) return; // only one boss at a time — wait it out; nextBossAt reschedules when it dies (see killCreep)
+  spawnBoss();
+}
+
+// derives each boss's passive-skill behavior every frame. hp-mutating effects (regen, summon) only run
+// on whoever owns the real hp value — the host in multiplayer, or the only client in Survival — while
+// purely cosmetic/self-damage effects (enrage's stat multipliers, the nova hitting your own local player)
+// are safe to compute on every client independently since they're deterministic from the boss's synced
+// hp/position/spawn time.
+function updateBossPassives(dt){
+  const now = performance.now();
+  for(const c of creeps){
+    if(!c.boss || c.hp<=0) continue;
+    const since = Date.now() - (c.spawnedAt||Date.now());
+    const hpFrac = clamp(c.hp/c.maxHp, 0, 1);
+
+    if(c.passive === "enrage"){
+      const t2 = hpFrac < 0.5 ? (0.5-hpFrac)*2 : 0; // 0..1 as hp goes 50%->0%
+      c._enrageDmgMult = 1 + t2*0.8;
+      c._enrageSpeedMult = 1 + t2*0.4;
+    } else {
+      c._enrageDmgMult = 1; c._enrageSpeedMult = 1;
+    }
+
+    c.shieldActive = c.passive==="shield" && (since % BOSS_SHIELD_INTERVAL) < BOSS_SHIELD_DURATION;
+
+    if(c.passive === "nova"){
+      const cyc = since % BOSS_NOVA_INTERVAL;
+      if(cyc < 120 && now-(c._lastNovaTrigger||0) > 1000){
+        c._lastNovaTrigger = now;
+        novaEffects.push({ x:c.x, y:c.y, radius:10, maxRadius:BOSS_NOVA_RADIUS, life:0.4, maxLife:0.4, color:"#ff4d4d" });
+        playKnockback();
+        const dP = Math.hypot(player.x-c.x, player.y-c.y);
+        if(dP < BOSS_NOVA_RADIUS){
+          tryDamagePlayer(player, Math.round(c.dmg*0.7), c);
+          const nx=(player.x-c.x)/(dP||1), ny=(player.y-c.y)/(dP||1);
+          player.x = clamp(player.x+nx*BOSS_NOVA_KNOCK, player.radius, world.w-player.radius);
+          player.y = clamp(player.y+ny*BOSS_NOVA_KNOCK, player.radius, world.h-player.radius);
+        }
+      }
+    }
+
+    if(c.passive === "summon" && (mode!=="multiplayer" || isHost()) && !c.netBoss){
+      const cyc = since % BOSS_SUMMON_INTERVAL;
+      if(cyc < 120 && now-(c._lastSummonTrigger||0) > 1000){
+        c._lastSummonTrigger = now;
+        const addHp = 16*(1+elapsed/45), addDmg = 6*(1+elapsed/90);
+        for(let i=0;i<2;i++){
+          const ang = rand(0,Math.PI*2);
+          creeps.push({ id:uid(), x:clamp(c.x+Math.cos(ang)*80,20,world.w-20), y:clamp(c.y+Math.sin(ang)*80,20,world.h-20),
+            radius:15, hp:addHp, maxHp:addHp, dmg:addDmg, speed:rand(70,110), expValue:6, brute:false,
+            hitTimers:{}, lastTouch:-9999 });
+        }
+        showBanner("👹 "+c.name+" memanggil bala bantuan!");
+      }
+    }
+
+    if(c.passive === "regen" && (mode!=="multiplayer" || isHost()) && !c.netBoss){
+      if(now - (c.lastHitAt||0) > BOSS_REGEN_IDLE && c.hp < c.maxHp){
+        c.hp = Math.min(c.maxHp, c.hp + c.maxHp*BOSS_REGEN_RATE*dt);
+      }
+    }
+  }
+}
+
+// eases a networked mirror's position toward the host's latest broadcast, same trick used for
+// remote players — covers both the boss mirror (netBoss) and every ordinary mirrored creep
+// (netMirror) — and drops the mirror if the host goes quiet for a while (disconnect/migration),
+// so a "ghost" enemy can never linger forever, invulnerable, after its real owner is gone
+function updateNetBossInterp(dt){
+  const smooth = 1 - Math.exp(-10*dt);
+  const now = performance.now();
+  for(const c of creeps){
+    if((!c.netBoss && !c.netMirror) || c.hp<=0) continue;
+    if(now - (c.lastNetSync||now) > 6000){ c.hp = 0; continue; }
+    if(c.targetX!=null){
+      c.x += (c.targetX-c.x)*smooth;
+      c.y += (c.targetY-c.y)*smooth;
+    }
+  }
+}
+
+function applyNetBossState(b){
+  let c = creeps.find(cc=>cc.boss && cc.netId===b.id);
+  const now = performance.now();
+  if(!c){
+    c = {
+      id: uid(), netId: b.id, netBoss: true,
+      x:b.x, y:b.y, targetX:b.x, targetY:b.y,
+      radius:b.radius, hp:b.hp, maxHp:b.maxHp, dmg:b.dmg, speed:b.speed,
+      expValue:b.expValue, boss:true, brute:false, name:b.name,
+      passive:b.passive, spawnedAt:b.spawnedAt, lastNetSync: now,
+      hitTimers:{}, lastTouch:-9999,
+    };
+    creeps.push(c);
+    const pdef = BOSS_PASSIVES.find(bp=>bp.key===b.passive);
+    showBanner("⚠ "+b.name+" MUNCUL! "+(pdef?pdef.icon+" "+pdef.label:""));
+    playBossRoar();
+  } else {
+    c.targetX = b.x; c.targetY = b.y;
+    c.hp = b.hp; c.maxHp = b.maxHp; c.dmg = b.dmg; c.speed = b.speed;
+    c.lastNetSync = now;
+  }
+}
+function clearNetBoss(){
+  for(const c of creeps){ if(c.boss && c.netBoss) c.hp = 0; }
+}
+
+// ---- generalized world sync: every ordinary creep, ground sword pickup & blade pack ----
+// Host is the sole spawner/simulator for all of these in multiplayer (see the isHost() gates on
+// updateCreepSpawning/spawnPickupsAmbient/spawnBladePackAmbient); it piggybacks a compact snapshot
+// of all three on its regular state broadcast (see broadcastState), and every other client mirrors
+// that snapshot here instead of running its own independent copy — so "musuh dan powerup yang
+// dilihat 1 pemain sama persis dengan pemain lainnya" holds for the whole shared world, not just
+// the boss/skill-orbs like before.
+const justTakenIds = new Set();
+function markJustTaken(id){
+  justTakenIds.add(id);
+  setTimeout(()=>justTakenIds.delete(id), 2000); // grace window so the item doesn't flicker back in before the host's own list catches up
+}
+function applyMirrorList(localArr, hostList, build){
+  if(!hostList) return;
+  const ids = new Set(hostList.map(e=>e.id));
+  for(let i=localArr.length-1;i>=0;i--){ if(!ids.has(localArr[i].id)) localArr.splice(i,1); }
+  for(const e of hostList){
+    if(justTakenIds.has(e.id)) continue;
+    if(!localArr.some(x=>x.id===e.id)) localArr.push(build(e));
+  }
+}
+function applyWorldSnapshot(w){
+  const now = performance.now();
+  const seen = new Set();
+  for(const e of (w.creeps||[])){
+    seen.add(e.id);
+    let c = creeps.find(cc=>cc.netMirror && cc.netId===e.id);
+    if(!c){
+      c = {
+        id: uid(), netId: e.id, netMirror: true,
+        x:e.x, y:e.y, targetX:e.x, targetY:e.y,
+        radius:e.r, hp:e.hp, maxHp:e.maxHp, dmg:e.dmg, speed:e.spd, expValue:e.xp,
+        brute: !!e.b, swordsman: !!e.s, boss:false, spinAngle: e.sp||0,
+        swords: e.sw ? Array.from({length:e.sw}, ()=>({color:"#c58bff"})) : [],
+        lastNetSync: now, hitTimers:{}, lastTouch:-9999,
+      };
+      creeps.push(c);
+    } else {
+      c.targetX = e.x; c.targetY = e.y; c.hp = e.hp; c.maxHp = e.maxHp;
+      c.dmg = e.dmg; c.speed = e.spd; c.spinAngle = e.sp!=null? e.sp : c.spinAngle;
+      if(e.sw!=null && (!c.swords || c.swords.length!==e.sw)){
+        c.swords = Array.from({length:e.sw}, ()=>({color:"#c58bff"}));
+      }
+      c.lastNetSync = now;
+    }
+  }
+  for(const c of creeps){ if(c.netMirror && !seen.has(c.netId)) c.hp = 0; }
+
+  applyMirrorList(pickups, w.pk, (e)=>({ x:e.x, y:e.y, tier:tierByKey(e.t)||SWORD_TIERS[0], id:e.id }));
+  applyMirrorList(bladePacks, w.bp, (e)=>({ x:e.x, y:e.y, pack: BLADE_PACKS[e.k]||BLADE_PACKS[0], id:e.id }));
+}
+
+// central choke point for all creep damage: blocks it during a boss shield window, and — for any
+// networked mirror (boss or ordinary creep) — forwards it to the host (who owns the real hp)
+// instead of mutating locally. Returns true if the hit should show normal damage feedback, false
+// if it was blocked.
+function applyDamageToCreep(c, dmg){
+  if(c.boss && c.shieldActive){
+    spawnFloater(c.x, c.y-c.radius-6, "🛡️ Diblokir!", "#8be9ff");
+    return false;
+  }
+  if(c.boss && c.netBoss){
+    if(channel) channel.send({type:"broadcast", event:"bossHit", payload:{ netId:c.netId, dmg, fromId:myId }});
+    return true;
+  }
+  if(c.netMirror){
+    if(channel) channel.send({type:"broadcast", event:"creepHit", payload:{ netId:c.netId, dmg, fromId:myId }});
+    return true;
+  }
+  c.hp -= dmg;
+  if(c.boss) c.lastHitAt = performance.now();
+  if(c.hp<=0) killCreep(c);
+  return true;
+}
+
+function updateCreeps(dt){
+  const now0 = performance.now();
+  for(const c of creeps){
+    if(c.hp<=0) continue;
+    if(c.knockUntil && now0 < c.knockUntil) continue; // reeling from a knockback — AI stands down briefly
+
+    if(c.swordsman && !c.netMirror){
+      c.spinAngle = (c.spinAngle||0) + creepSpinSpeed(c)*dt;
+
+      const dPlayer = Math.hypot(player.x-c.x, player.y-c.y);
+      if(dPlayer > CREEP_DESPAWN_RADIUS){ c.hp = 0; continue; }
+
+      // hunt the nearest field pickup to power up its blade before it's fully armed
+      let seek = null;
+      if(c.swords.length < SWORDSMAN_MAX_SWORDS){
+        let bestD = SWORDSMAN_PICKUP_RANGE*SWORDSMAN_PICKUP_RANGE;
+        for(const pu of pickups){
+          const dd = dist2(pu.x,pu.y,c.x,c.y);
+          if(dd < bestD){ bestD = dd; seek = pu; }
+        }
+      }
+
+      const tx = seek? seek.x : player.x, ty = seek? seek.y : player.y;
+      const dx = tx-c.x, dy = ty-c.y;
+      const d = Math.hypot(dx,dy)||1;
+      // when hunting the player it holds at blade range rather than pressing to body contact —
+      // it's a duelist, not a brawler: all its damage comes from trySwordsmanBladeHits() below
+      const stopDist = seek? c.radius+10 : (creepOrbitRadius(c) + SWORD_VISUAL_LEN*0.6 + player.radius - 6);
+      if(d > stopDist){
+        c.x += dx/d*c.speed*dt;
+        c.y += dy/d*c.speed*dt;
+      }
+
+      if(seek && d < c.radius+16){
+        const idx = pickups.indexOf(seek);
+        if(idx>=0){
+          creepAddSword(c, seek.tier);
+          pickups.splice(idx,1);
+          playPickup();
+        }
+      }
+      continue;
+    }
+
+    const dx = player.x-c.x, dy = player.y-c.y;
+    const d = Math.hypot(dx,dy)||1;
+    if(c.netBoss){
+      // a networked boss mirror: position comes from the host via updateNetBossInterp(), not local chase AI
+      if(d < c.radius + player.radius){
+        tryDamagePlayer(player, c.dmg*(c._enrageDmgMult||1), c);
+      }
+      continue;
+    }
+    if(c.netMirror){
+      // a networked ordinary-creep mirror: position comes from the host via updateNetBossInterp(), just handle contact damage
+      if(d < c.radius + player.radius){
+        tryDamagePlayer(player, c.dmg, c);
+      }
+      continue;
+    }
+    if(d > CREEP_DESPAWN_RADIUS){ c.hp = 0; continue; } // far behind — recycle it, a fresh one will spawn nearby instead
+    const stopDist = c.radius + player.radius - 4; // hover just inside contact range, stays in blade sweep zone
+    if(d > stopDist){
+      const spd = c.boss ? c.speed*(c._enrageSpeedMult||1) : c.speed;
+      c.x += dx/d*spd*dt;
+      c.y += dy/d*spd*dt;
+    }
+
+    // contact damage to player
+    if(d < c.radius + player.radius){
+      tryDamagePlayer(player, c.boss ? c.dmg*(c._enrageDmgMult||1) : c.dmg, c);
+    }
+  }
+  // light mutual separation so creeps don't stack exactly on top of each other
+  for(let i=0;i<creeps.length;i++){
+    if(creeps[i].hp<=0) continue;
+    for(let j=i+1;j<creeps.length;j++){
+      if(creeps[j].hp<=0) continue;
+      const a=creeps[i], b=creeps[j];
+      const dx=b.x-a.x, dy=b.y-a.y;
+      const d = Math.hypot(dx,dy)||0.01;
+      const minD = a.radius+b.radius;
+      if(d < minD){
+        const push = (minD-d)/2;
+        const nx=dx/d, ny=dy/d;
+        a.x -= nx*push; a.y -= ny*push;
+        b.x += nx*push; b.y += ny*push;
+      }
+    }
+  }
+}
+
+function trySwordHits(p, targetsAreCreeps){
+  const swords = p.swords;
+  if(swords.length===0) return;
+  const R = orbitRadius(p);
+  const now = performance.now();
+  for(let i=0;i<swords.length;i++){
+    const angle = p.spinAngle + (i/swords.length)*Math.PI*2;
+    const x1 = p.x + Math.cos(angle)*(R-SWORD_VISUAL_LEN*0.5);
+    const y1 = p.y + Math.sin(angle)*(R-SWORD_VISUAL_LEN*0.5);
+    const x2 = p.x + Math.cos(angle)*(R+SWORD_VISUAL_LEN*0.6);
+    const y2 = p.y + Math.sin(angle)*(R+SWORD_VISUAL_LEN*0.6);
+    if(targetsAreCreeps){
+      for(const c of creeps){
+        if(c.hp<=0) continue;
+        const dd = pointSegDist(c.x,c.y,x1,y1,x2,y2);
+        if(dd < BLADE_HALF_WIDTH + c.radius){
+          const last = c.hitTimers[i] || 0;
+          if(now-last > HIT_COOLDOWN){
+            c.hitTimers[i] = now;
+            const dmg = swords[i].dmg * p.bonusDmgMult;
+            playClang();
+            if(applyDamageToCreep(c, dmg)){
+              spawnFloater(c.x, c.y-c.radius, "-"+Math.round(dmg), "#ffd43b");
+              if(swords[i].lifesteal){
+                const healed = dmg*swords[i].lifesteal;
+                p.hp = Math.min(p.maxHp, p.hp + healed);
+                spawnFloater(p.x, p.y-p.radius-20, "+"+Math.round(healed), "#ff6b9d");
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+// swordsman creeps hit the player with their own spinning blade (reach extends past their body),
+// and clash blade-vs-blade with the player instead of just letting hits pass through each other
+function trySwordsmanBladeHits(){
+  const now = performance.now();
+  for(const c of creeps){
+    if(c.hp<=0 || !c.swordsman) continue;
+    const R = creepOrbitRadius(c);
+    for(let j=0;j<c.swords.length;j++){
+      const angle = c.spinAngle + (j/c.swords.length)*Math.PI*2;
+      const [x1,y1,x2,y2] = swordSegment(c.x,c.y,angle,R);
+      const dd = pointSegDist(player.x,player.y,x1,y1,x2,y2);
+      if(dd < BLADE_HALF_WIDTH + player.radius){
+        const last = c.hitTimers[j] || 0;
+        if(now-last > HIT_COOLDOWN){
+          c.hitTimers[j] = now;
+          tryDamagePlayer(player, c.swords[j].dmg, c);
+        }
+      }
+    }
+  }
+}
+
+function trySwordVsSwordsmanClash(){
+  const R = orbitRadius(player);
+  const now = performance.now();
+  for(const c of creeps){
+    if(c.hp<=0 || !c.swordsman) continue;
+    if(now - (c.lastClashAt||0) < CLASH_COOLDOWN) continue;
+    const cR = creepOrbitRadius(c);
+    let clashed = false;
+    for(let i=0;i<player.swords.length && !clashed;i++){
+      const pAngle = player.spinAngle + (i/player.swords.length)*Math.PI*2;
+      const [px1,py1,px2,py2] = swordSegment(player.x,player.y,pAngle,R);
+      for(let j=0;j<c.swords.length;j++){
+        const cAngle = c.spinAngle + (j/c.swords.length)*Math.PI*2;
+        const [cx1,cy1,cx2,cy2] = swordSegment(c.x,c.y,cAngle,cR);
+        const dd = segSegDist(px1,py1,px2,py2, cx1,cy1,cx2,cy2);
+        if(dd < BLADE_HALF_WIDTH*2){
+          c.lastClashAt = now;
+          resolveClash(player, i, c, j);
+          clashed = true;
+          break;
+        }
+      }
+    }
+  }
+}
+
+function resolveClash(pOwner, pIdx, cOwner, cIdx){
+  const sa = pOwner.swords[pIdx], sb = cOwner.swords[cIdx];
+  if(!sa || !sb) return;
+  playClang();
+  if(sa.dmg === sb.dmg){
+    spawnFloater((pOwner.x+cOwner.x)/2, (pOwner.y+cOwner.y)/2 - 20, "Beradu!", "#ffd43b");
+    return;
+  }
+  const playerLoses = sa.dmg < sb.dmg;
+  const loserOwner = playerLoses? pOwner : cOwner;
+  const loserIdx = playerLoses? pIdx : cIdx;
+  if(loserOwner.swords.length <= 1) return; // never fully disarm — always keep at least one blade
+  const lost = loserOwner.swords[loserIdx];
+  loserOwner.swords.splice(loserIdx,1);
+  spawnFloater(loserOwner.x, loserOwner.y-30, "Blade pecah!", lost.color);
+  playHurt();
+  if(playerLoses) showBanner("💥 Bladamu kalah beradu, satu pecah!");
+}
+
+// killerId: who actually landed the finishing blow (defaults to "me" — the normal case, since
+// applyDamageToCreep only ever calls killCreep locally for creeps I own outright: my own real
+// creeps in survival, or my own real creeps in multiplayer if I'm the host). It only differs from
+// myId when the host is processing a "creepHit"/"bossHit" relay on behalf of some other client.
+// Boss keeps the old "everyone gets credit" behavior (bossDeath below); ordinary creeps instead give
+// credit ONLY to the actual killer, so a crowd of players farming the same shared field doesn't all
+// get free exp for kills they didn't make.
+function killCreep(c, killerId){
+  if(killerId===undefined) killerId = myId;
+  c.hp = 0;
+  if(mode==="multiplayer" && !c.boss){
+    if(killerId===myId){ gainExp(player, c.expValue, c.x, c.y); kills++; }
+    else if(channel){ channel.send({type:"broadcast", event:"killCredit", payload:{ killerId, expValue:c.expValue, x:c.x, y:c.y }}); }
+  } else {
+    gainExp(player, c.expValue, c.x, c.y);
+    kills++;
+  }
+  if(c.boss){
+    showBanner("💀 "+c.name+" TUMBANG!");
+    playBossDeath();
+    nextBossAt = elapsed + BOSS_INTERVAL; // schedule the next one from the moment this one falls
+    // guaranteed juicy reward: a blade pack (skewed toward the good tiers) + a couple of extra sword pickups
+    bladePacks.push({ x:c.x, y:c.y, pack: pickBossBladePack(), id: uid() });
+    for(let i=0;i<3;i++){
+      pickups.push({ x:c.x+rand(-40,40), y:c.y+rand(-40,40), tier: weightedBruteTier(), id: uid() });
+    }
+    // in multiplayer, tell everyone else the shared boss is down so their mirror dies too and they
+    // each get their own kill credit + reward, even though only the host's copy actually tracked the hp
+    if(mode==="multiplayer" && channel && !c.netBoss){
+      channel.send({type:"broadcast", event:"bossDeath", payload:{ netId:c.id, x:c.x, y:c.y, name:c.name, expValue:c.expValue }});
+      if(roomIsActive && sb){
+        sb.rpc("room_add_boss_bladewar", { p_room: roomCode, p_boss_name: c.name }).catch(e=>console.warn("room_add_boss failed", e));
+      }
+    }
+    return;
+  }
+  if(c.swordsman){
+    showBanner("⚔ Musuh bersenjata tumbang!");
+    // defeating a swordsman drops every blade it was carrying — worth hunting down
+    c.swords.forEach(sw=>{
+      pickups.push({ x:c.x+rand(-24,24), y:c.y+rand(-24,24), tier: tierByKey(sw.key), id: uid() });
+    });
+    return;
+  }
+  const dropChance = c.brute? 0.85 : 0.22;
+  if(Math.random() < dropChance){
+    pickups.push({ x:c.x+rand(-10,10), y:c.y+rand(-10,10), tier: c.brute? weightedBruteTier() : pickTier(), id: uid() });
+  }
+}
+function tierByKey(key){ return SWORD_TIERS.find(t=>t.key===key); }
+function weightedBruteTier(){
+  const r = Math.random();
+  if(r<0.22) return tierByKey("legendary");
+  if(r<0.45) return tierByKey("vampiric");
+  if(r<0.75) return tierByKey("epic");
+  return tierByKey("rare");
+}
+
+function tryDamagePlayer(p, dmg, source){
+  const now = performance.now();
+  if(now - p.lastHitAt < PLAYER_IFRAME) return;
+  p.lastHitAt = now;
+  p.hp -= dmg;
+  spawnFloater(p.x, p.y-p.radius-6, "-"+Math.round(dmg), "#ff5b5b");
+  playHurt();
+  if(p.hp<=0 && !p.dead){
+    p.dead = true;
+    onPlayerDeath();
+  }
+}
+
+/* ---------- Pickups ---------- */
+function spawnPickupsAmbient(dt){
+  // host-authoritative in multiplayer — see spawnSkillOrbsAmbient for why
+  if(mode==="multiplayer" && !isHost()) return;
+  state.pickupTimer = (state.pickupTimer||0) - dt;
+  if(state.pickupTimer<=0){
+    state.pickupTimer = rand(2.5,4.5);
+    if(pickups.length < 40){
+      pickups.push({
+        x: clamp(player.x+rand(-1000,1000), 40, world.w-40),
+        y: clamp(player.y+rand(-1000,1000), 40, world.h-40),
+        tier: pickTier(), id: uid()
+      });
+    }
+  }
+}
+const state = {};
+
+function updatePickups(){
+  for(let i=pickups.length-1;i>=0;i--){
+    const pu = pickups[i];
+    if(dist2(pu.x,pu.y,player.x,player.y) < (player.radius+14)*(player.radius+14)){
+      const result = addSword(player, pu.tier);
+      if(result && result.upgraded){
+        spawnFloater(pu.x,pu.y,"Upgrade! "+pu.tier.label,pu.tier.color);
+      } else {
+        spawnFloater(pu.x,pu.y,"+"+pu.tier.label,pu.tier.color);
+      }
+      playPickup();
+      pickups.splice(i,1);
+      if(mode==="multiplayer" && !isHost()){
+        markJustTaken(pu.id);
+        if(channel) channel.send({type:"broadcast", event:"itemTaken", payload:{kind:"pickup", id:pu.id}});
+      }
+    }
+  }
+}
+
+/* ================= MULTIPLAYER ================= */
+function connectMultiplayer(roomCodeOverride){
+  if(!sb){ setConn(false,"supabase gagal dimuat"); return; }
+  roomCode = (roomCodeOverride||"public").trim().toLowerCase() || "public";
+  roomIsActive = false; roomIsCreator = false; roomEnded = false;
+  channel = sb.channel("bladewar-"+roomCode, { config: { broadcast: { self:false }, presence: { key: myId } } });
+  joinRoom(); // async, independent of the realtime channel above — see function for what it does on success/failure
+
+  channel.on("broadcast", {event:"roomEnded"}, ()=>{
+    roomEnded = true;
+    submitScore(); // fold my current progress into the survival leaderboard too, same as whoever ended it
+    showRoomSummary(roomCode, "Room ini baru saja diakhiri oleh pembuatnya.");
+  });
+
+  channel.on("broadcast", {event:"state"}, ({payload})=>{
+    if(payload.id===myId) return;
+    const now = performance.now();
+    const existing = remotePlayers.get(payload.id);
+    // network updates only arrive every BROADCAST_INTERVAL (~90ms) — snapping straight to each new
+    // x/y made remote players look choppy ("patah2") against our own smooth 60fps local movement.
+    // Keep the currently-displayed x/y and let updateRemoteInterpolation() ease toward the new target
+    // every frame instead; spin angle is extrapolated forward client-side (see drawRemotePlayer) since
+    // it's just level*speed, so the orbiting blades don't visibly stall between packets either.
+    const merged = { ...payload, lastSeen: now, targetX: payload.x, targetY: payload.y,
+      spinBase: payload.spinAngle, spinBaseT: now };
+    if(existing){ merged.x = existing.x; merged.y = existing.y; }
+    else { merged.x = payload.x; merged.y = payload.y; }
+    remotePlayers.set(payload.id, merged);
+
+    // the current host piggybacks the shared boss's live hp/position on its regular state packet —
+    // cheaper than a separate broadcast, and keeps every player's boss mirror in sync automatically
+    if(payload.id === currentHostId()){
+      if(payload.boss) applyNetBossState(payload.boss);
+      else if(payload.bossGone) clearNetBoss();
+      if(payload.world) applyWorldSnapshot(payload.world);
+    }
+  });
+
+  channel.on("broadcast", {event:"bossSpawn"}, ({payload})=>{
+    applyNetBossState(payload);
+  });
+
+  channel.on("broadcast", {event:"bossHit"}, ({payload})=>{
+    if(!isHost()) return; // only the host's copy holds the real hp value
+    const c = creeps.find(cc=>cc.boss && cc.id===payload.netId && cc.hp>0);
+    if(!c || c.shieldActive) return;
+    c.hp -= payload.dmg;
+    c.lastHitAt = performance.now();
+    if(c.hp<=0) killCreep(c, payload.fromId);
+  });
+
+  channel.on("broadcast", {event:"bossDeath"}, ({payload})=>{
+    const c = creeps.find(cc=>cc.boss && cc.netBoss && cc.netId===payload.netId);
+    if(c) c.hp = 0;
+    showBanner("💀 "+payload.name+" TUMBANG!");
+    playBossDeath();
+    gainExp(player, payload.expValue||140, payload.x, payload.y);
+    kills++;
+    bladePacks.push({ x:payload.x, y:payload.y, pack: pickBossBladePack(), id: uid() });
+    for(let i=0;i<3;i++){
+      pickups.push({ x:payload.x+rand(-40,40), y:payload.y+rand(-40,40), tier: weightedBruteTier(), id: uid() });
+    }
+  });
+
+  // ordinary (non-boss) creeps: the host is the sole owner of the real hp — a mirror on any other
+  // client just forwards the hit here instead of mutating locally, same chokepoint as bossHit above.
+  channel.on("broadcast", {event:"creepHit"}, ({payload})=>{
+    if(!isHost()) return;
+    const c = creeps.find(cc=>!cc.netMirror && !cc.netBoss && cc.id===payload.netId && cc.hp>0);
+    if(!c) return;
+    c.hp -= payload.dmg;
+    if(c.hp<=0) killCreep(c, payload.fromId);
+  });
+
+  // per-kill credit for ordinary creeps (unlike the boss, which everyone gets credit for): only the
+  // client whose id matches killerId actually applies the exp/kill-counter bump.
+  channel.on("broadcast", {event:"killCredit"}, ({payload})=>{
+    if(payload.killerId !== myId) return;
+    gainExp(player, payload.expValue, payload.x, payload.y);
+    kills++;
+  });
+
+  // a guest grabbed a ground item (sword pickup / blade pack) from its local mirror — the host is
+  // authoritative for these lists, so it removes the item for real here; everyone else just stops
+  // seeing it once it's absent from the next world snapshot.
+  channel.on("broadcast", {event:"itemTaken"}, ({payload})=>{
+    if(!isHost()) return;
+    if(payload.kind==="pickup"){ const idx=pickups.findIndex(p=>p.id===payload.id); if(idx>=0) pickups.splice(idx,1); }
+    else if(payload.kind==="bladePack"){ const idx=bladePacks.findIndex(p=>p.id===payload.id); if(idx>=0) bladePacks.splice(idx,1); }
+  });
+
+  channel.on("broadcast", {event:"orbSpawn"}, ({payload})=>{
+    if(skillOrbs.some(o=>o.id===payload.id)) return;
+    skillOrbs.push({ x:payload.x, y:payload.y, skillKey:payload.skillKey, id:payload.id });
+  });
+
+  channel.on("broadcast", {event:"hit"}, ({payload})=>{
+    if(payload.targetId !== myId || !pvpMode) return; // co-op players never take PvP damage, even if an attacker's client is stale
+    tryDamagePlayer(player, payload.dmg, null);
+  });
+
+  channel.on("broadcast", {event:"death"}, ({payload})=>{
+    remotePlayers.delete(payload.id);
+  });
+
+  // simple ephemeral chat, piggybacking the same room channel — nothing persisted, just live text
+  // between whoever's currently connected, like the boss/orb sync but for talking to each other
+  channel.on("broadcast", {event:"chat"}, ({payload})=>{
+    addChatLine(payload.name||"?", payload.text, false);
+  });
+
+  channel.subscribe((status)=>{
+    if(status==="SUBSCRIBED"){ setConn(true, "room: "+roomCode); }
+    else if(status==="CHANNEL_ERROR" || status==="TIMED_OUT"){ setConn(false, "koneksi gagal"); }
+    else if(status==="CLOSED"){ setConn(false, "terputus"); }
+  });
+}
+
+function disconnectMultiplayer(){
+  if(channel){
+    try{ channel.send({type:"broadcast", event:"death", payload:{id:myId}}); }catch(e){}
+    try{ sb.removeChannel(channel); }catch(e){}
+    channel = null;
+  }
+  remotePlayers.clear();
+  roomIsActive = false; roomIsCreator = false;
+}
+
+// joinRoom: called (fire-and-forget) right after opening the realtime channel. Creates the room row
+// if this room_code is brand new (I become the creator), or joins the existing one without touching
+// its created_at — that's the whole point: everyone's difficulty/wave/boss timing is driven by
+// elapsed, so jumping elapsed forward to match how long the room has actually existed means a
+// latecomer faces the exact same challenge as everyone already inside instead of starting at 00:00.
+async function joinRoom(){
+  if(!sb) return;
+  try{
+    const { data, error } = await sb.rpc("room_join_or_create_bladewar", {
+      p_room: roomCode, p_player_id: myPlayerId, p_name: playerName,
+    });
+    if(error) throw error;
+    if(data.ended_at){
+      // per design: a room that's been "Diakhiri" is closed for good — no more playing under that
+      // code, only the recap. Bail out of the realtime session we just opened and show it instead.
+      roomEnded = true;
+      disconnectMultiplayer();
+      showRoomSummary(data.room_code, "Room ini sudah diakhiri sebelumnya — bikin room baru buat main bareng lagi.");
+      return;
+    }
+    roomIsActive = true;
+    roomIsCreator = (data.created_by === myPlayerId);
+    const createdMs = new Date(data.created_at).getTime();
+    if(!Number.isNaN(createdMs)){
+      elapsed = Math.max(0, (Date.now()-createdMs)/1000);
+      announcedWave = currentWave(); // avoid re-announcing every wave we jumped straight past
+    }
+    roomStatsSnapshot = { kills, points: computePoints(player.level, kills, Math.floor(elapsed)), deaths: deathCount };
+  }catch(e){
+    console.warn("room join failed", e); // no persistent room this session — plain ephemeral multiplayer still works
+  }
+}
+
+// flushRoomStats: reports deltas since the last flush via the atomic room_bump_stats RPC (so several
+// players writing at once never clobber each other's counts) — and, unlike the old version, ALWAYS
+// calls it even with zero deltas, purely as a heartbeat: it's what keeps last_seen fresh so the
+// multiplayer room browser's live "X orang main" count doesn't think an idle-but-connected player left.
+async function flushRoomStats(){
+  if(!sb || !roomIsActive || roomEnded) return;
+  const curPoints = computePoints(player.level, kills, Math.floor(elapsed));
+  const dKills = kills - roomStatsSnapshot.kills;
+  const dDeaths = deathCount - roomStatsSnapshot.deaths;
+  const dPoints = curPoints - roomStatsSnapshot.points;
+  roomStatsSnapshot = { kills, points: curPoints, deaths: deathCount };
+  try{
+    await sb.rpc("room_bump_stats_bladewar", {
+      p_room: roomCode, p_player_id: myPlayerId, p_name: playerName,
+      p_dkills: Math.max(0,dKills), p_ddeaths: Math.max(0,dDeaths), p_dpoints: Math.max(0,dPoints),
+      p_level: player.level,
+    });
+  }catch(e){ console.warn("room stat flush failed", e); }
+}
+
+// fetches and renders the end-of-room recap: per-player kills/deaths/points, plus which bosses fell.
+async function showRoomSummary(forRoomCode, note){
+  running = false;
+  document.getElementById("hud").classList.add("hidden");
+  document.getElementById("skillbar").classList.add("hidden");
+  document.getElementById("exitBtn").classList.add("hidden");
+  document.getElementById("exitModal").classList.add("hidden");
+  document.getElementById("results").classList.add("hidden");
+  hideAllScreens();
+  document.getElementById("roomSummaryModal").classList.remove("hidden");
+  document.getElementById("roomSummarySub").textContent = note || ("Room \""+forRoomCode+"\" sudah berakhir.");
+  document.getElementById("roomSummaryBosses").innerHTML = "Memuat rekap…";
+  document.getElementById("roomSummaryPlayers").innerHTML = "";
+  if(!sb) return;
+  try{
+    const [{ data: roomRow }, { data: players, error: pErr }] = await Promise.all([
+      sb.from("rooms_bladewar").select("bosses_defeated").eq("room_code", forRoomCode).maybeSingle(),
+      sb.from("room_players_bladewar").select("name,kills,deaths,points").eq("room_code", forRoomCode).order("points",{ascending:false}),
+    ]);
+    if(pErr) throw pErr;
+    const bosses = (roomRow && roomRow.bosses_defeated) || [];
+    document.getElementById("roomSummaryBosses").innerHTML = bosses.length
+      ? "<b>Boss ditumbangkan:</b> " + bosses.map(b=>escapeHtml(b.name)).join(", ")
+      : "<span style=\"color:var(--text-dim)\">Belum ada boss yang tumbang di room ini.</span>";
+    document.getElementById("roomSummaryPlayers").innerHTML = (players||[]).map(p=>
+      `<div class="roster-row"><span>${escapeHtml(p.name)}</span><span>Kill ${p.kills} · Mati ${p.deaths} · <b>${p.points} pt</b></span></div>`
+    ).join("") || "<div class=\"lb-empty\">Belum ada data pemain.</div>";
+  }catch(e){
+    console.warn("load room summary failed", e);
+    document.getElementById("roomSummaryBosses").innerHTML = "";
+    document.getElementById("roomSummaryPlayers").innerHTML = "<div class=\"lb-empty\">Gagal memuat rekap.</div>";
+  }
+}
+
+function setConn(ok, text){
+  const box = document.getElementById("connstatus");
+  box.classList.remove("hidden");
+  document.getElementById("connDot").className = "dot " + (ok?"ok":"bad");
+  document.getElementById("connText").textContent = text;
+}
+
+function broadcastState(){
+  if(!channel) return;
+  const now = performance.now();
+  if(now - lastBroadcast < BROADCAST_INTERVAL) return;
+  lastBroadcast = now;
+  const payload = {
+    id: myId, name: playerName, color: myColor,
+    x: player.x, y: player.y, level: player.level,
+    hp: player.hp, maxHp: player.maxHp,
+    swordCount: player.swords.length,
+    spinAngle: player.spinAngle,
+    orbitR: orbitRadius(player),
+    pvp: pvpMode,
+  };
+  // only the host's packet carries boss state — everyone else skips their own local boss in multiplayer
+  // entirely (see updateBossSpawning) and mirrors the host's copy instead, so it stays in sync for free
+  if(isHost()){
+    const boss = creeps.find(c=>c.boss && c.hp>0 && !c.netBoss);
+    if(boss){
+      payload.boss = { id:boss.id, x:boss.x, y:boss.y, hp:boss.hp, maxHp:boss.maxHp, dmg:boss.dmg,
+        speed:boss.speed, radius:boss.radius, name:boss.name, passive:boss.passive,
+        spawnedAt:boss.spawnedAt, expValue:boss.expValue };
+    } else {
+      payload.bossGone = true;
+    }
+    // full world snapshot: every ordinary creep + ground sword pickup + blade pack, so every
+    // client renders/collides against the exact same shared field instead of its own local roll
+    payload.world = {
+      creeps: creeps.filter(c=>!c.boss && !c.netMirror && c.hp>0).slice(0, MAX_CREEPS_MP+5).map(c=>({
+        id:c.id, x:Math.round(c.x), y:Math.round(c.y), hp:Math.round(c.hp), maxHp:Math.round(c.maxHp),
+        r:c.radius, dmg:Math.round(c.dmg*10)/10, spd:Math.round(c.speed), xp:c.expValue,
+        b:c.brute?1:0, s:c.swordsman?1:0, sw:c.swords?c.swords.length:0,
+        sp: c.spinAngle? Math.round(c.spinAngle*100)/100 : 0,
+      })),
+      pk: pickups.slice(0,40).map(p=>({ id:p.id, x:Math.round(p.x), y:Math.round(p.y), t:p.tier.key })),
+      bp: bladePacks.map(bp=>({ id:bp.id, x:Math.round(bp.x), y:Math.round(bp.y), k:BLADE_PACKS.indexOf(bp.pack) })),
+    };
+  }
+  channel.send({ type:"broadcast", event:"state", payload });
+}
+
+function pruneRemotePlayers(){
+  const now = performance.now();
+  for(const [id,rp] of remotePlayers){
+    if(now - rp.lastSeen > 5000) remotePlayers.delete(id);
+  }
+}
+
+// eases each remote player's displayed x/y toward the latest network position every frame,
+// instead of snapping on each ~90ms packet — this is what actually smooths out the movement
+function updateRemoteInterpolation(dt){
+  const smooth = 1 - Math.exp(-16*dt);
+  for(const [id,rp] of remotePlayers){
+    if(rp.targetX==null) continue;
+    rp.x += (rp.targetX-rp.x)*smooth;
+    rp.y += (rp.targetY-rp.y)*smooth;
+  }
+}
+
+function checkPvpHits(){
+  if(!channel || !pvpMode) return; // peaceful ("Berteman") players never throw PvP damage
+  const R = orbitRadius(player);
+  const now = performance.now();
+  for(let i=0;i<player.swords.length;i++){
+    const angle = player.spinAngle + (i/player.swords.length)*Math.PI*2;
+    const x1 = player.x + Math.cos(angle)*(R-SWORD_VISUAL_LEN*0.5);
+    const y1 = player.y + Math.sin(angle)*(R-SWORD_VISUAL_LEN*0.5);
+    const x2 = player.x + Math.cos(angle)*(R+SWORD_VISUAL_LEN*0.6);
+    const y2 = player.y + Math.sin(angle)*(R+SWORD_VISUAL_LEN*0.6);
+    for(const [id, rp] of remotePlayers){
+      if(rp.pvp === false) continue; // respect the other player's "Berteman" choice
+      const dd = pointSegDist(rp.x,rp.y,x1,y1,x2,y2);
+      if(dd < BLADE_HALF_WIDTH+16){
+        rp._hitTimers = rp._hitTimers || {};
+        const last = rp._hitTimers[i] || 0;
+        if(now-last > HIT_COOLDOWN){
+          rp._hitTimers[i] = now;
+          const dmg = player.swords[i].dmg * player.bonusDmgMult;
+          channel.send({type:"broadcast", event:"hit", payload:{ targetId:id, dmg, fromId: myId }});
+          spawnFloater(rp.x, rp.y-20, "-"+Math.round(dmg), "#ffd43b");
+          if(player.swords[i].lifesteal){
+            const healed = dmg*player.swords[i].lifesteal;
+            player.hp = Math.min(player.maxHp, player.hp + healed);
+            spawnFloater(player.x, player.y-player.radius-20, "+"+Math.round(healed), "#ff6b9d");
+          }
+          playClang();
+        }
+      }
+    }
+  }
+}
+
+/* ================= UPDATE LOOP ================= */
+let lastT = 0;
+// loop() is the actual requestAnimationFrame callback: it's just a thin safety wrapper around
+// loopFrame() so that if ANY single frame throws (an edge case we didn't anticipate — a weird
+// combo of boss passive + multiplayer sync + who knows what), the error is logged and swallowed
+// instead of silently killing requestAnimationFrame forever. Without this, one bad frame means
+// the whole game visibly "freezes" (canvas stops updating) while unrelated DOM buttons — chat,
+// Keluar — keep working fine, because they're separate listeners untouched by the dead loop.
+function loop(t){
+  try{
+    loopFrame(t);
+  }catch(err){
+    console.error("Bladewar: frame error, dilewati supaya game nggak macet total:", err);
+    if(running) requestAnimationFrame(loop);
+  }
+}
+function loopFrame(t){
+  if(!running) return;
+  if(!lastT) lastT = t;
+  let dt = (t-lastT)/1000;
+  lastT = t;
+  dt = Math.min(dt, 0.05);
+
+  elapsed += dt;
+
+  updatePlayerMovement(dt);
+  player.spinAngle += spinSpeed(player)*dt;
+
+  // both modes: local creeps, pickups, skill orbs & blade packs give every player something to farm
+  updateWaveAnnounce();
+  updateCreepSpawning(dt);
+  updateBossSpawning(dt);
+  updateCreeps(dt);
+  updateBossPassives(dt);
+  trySwordHits(player, true);
+  trySwordsmanBladeHits();
+  trySwordVsSwordsmanClash();
+  spawnPickupsAmbient(dt);
+  spawnSkillOrbsAmbient(dt);
+  spawnBladePackAmbient(dt);
+
+  if(mode==="multiplayer"){
+    updateRemoteInterpolation(dt);
+    updateNetBossInterp(dt);
+    broadcastState();
+    checkPvpHits();
+    pruneRemotePlayers();
+    if(roomIsActive){
+      const nowMs = performance.now();
+      if(nowMs - lastRoomFlush > ROOM_FLUSH_INTERVAL){ lastRoomFlush = nowMs; flushRoomStats(); }
+    }
+  }
+  updatePickups();
+  updateSkillPickups();
+  updateBladePackPickups();
+  updatePassiveSkills();
+  updateSkillEffects(dt);
+  if(creeps.length){ creeps = creeps.filter(c=>c.hp>0); } // sweep out anything killed this frame (swords/skills/despawn) so spawning never stalls
+  updateFloaters(dt);
+
+  camera.x = player.x;
+  camera.y = player.y;
+
+  render();
+  updateHUD();
+
+  if(player.hp<=0 && !resultsShown){
+    // handled in onPlayerDeath
+  }
+
+  requestAnimationFrame(loop);
+}
+
+function updateFloaters(dt){
+  for(let i=floaters.length-1;i>=0;i--){
+    const f = floaters[i];
+    f.life -= dt; f.y += f.vy*dt;
+    if(f.life<=0) floaters.splice(i,1);
+  }
+}
+
+function updatePlayerMovement(dt){
+  let dx=0, dy=0;
+  if(keys["w"]||keys["arrowup"]) dy -= 1;
+  if(keys["s"]||keys["arrowdown"]) dy += 1;
+  if(keys["a"]||keys["arrowleft"]) dx -= 1;
+  if(keys["d"]||keys["arrowright"]) dx += 1;
+  if(joy.active){ dx += joy.dx; dy += joy.dy; }
+  const len = Math.hypot(dx,dy);
+  if(len>0){ dx/=len; dy/=len; }
+  else if(joy.active){ dx = joy.dx; dy = joy.dy; }
+
+  player.x = clamp(player.x + dx*player.speed*dt, player.radius, world.w-player.radius);
+  player.y = clamp(player.y + dy*player.speed*dt, player.radius, world.h-player.radius);
+  if(dx||dy) player.facing = Math.atan2(dy,dx);
+}
+
+/* ================= RENDER ================= */
+function worldToScreen(x,y){
+  return { x: x - camera.x + canvas.width/2, y: y - camera.y + canvas.height/2 };
+}
+
+function render(){
+  ctx.fillStyle = "#0b0d14";
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  drawGrid();
+  drawWorldBounds();
+
+  for(const z of poisonZones) drawPoisonZone(z);
+  for(const pu of pickups) drawPickup(pu);
+  for(const orb of skillOrbs) drawSkillOrb(orb);
+  for(const bp of bladePacks) drawBladePack(bp);
+  for(const c of creeps) if(c.hp>0) drawCreep(c);
+
+  if(mode==="multiplayer"){
+    for(const [id,rp] of remotePlayers) drawRemotePlayer(rp);
+  }
+
+  drawPlayer(player, myColor, playerName, true);
+
+  for(const n of novaEffects) drawNova(n);
+  for(const l of lightnings) drawLightning(l);
+  for(const f of floaters) drawFloater(f);
+}
+
+function drawSkillOrb(orb){
+  const s = worldToScreen(orb.x,orb.y);
+  if(s.x<-40||s.x>canvas.width+40||s.y<-40||s.y>canvas.height+40) return;
+  const def = skillByKey(orb.skillKey);
+  const bob = Math.sin(performance.now()/280 + orb.x)*4;
+  ctx.beginPath();
+  ctx.arc(s.x, s.y+bob, 15, 0, Math.PI*2);
+  ctx.fillStyle = def.color; ctx.shadowColor = def.color; ctx.shadowBlur = 14;
+  ctx.fill(); ctx.shadowBlur = 0;
+  ctx.lineWidth=2; ctx.strokeStyle="rgba(255,255,255,0.6)"; ctx.stroke();
+  ctx.font="14px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
+  ctx.fillStyle="#0b0d14"; ctx.fillText(def.icon, s.x, s.y+bob+1);
+  ctx.textBaseline="alphabetic";
+}
+
+function drawBladePack(bp){
+  const s = worldToScreen(bp.x,bp.y);
+  if(s.x<-50||s.x>canvas.width+50||s.y<-50||s.y>canvas.height+50) return;
+  const bob = Math.sin(performance.now()/260 + bp.x)*5;
+  const cy = s.y+bob;
+  // little fan of blades behind the badge
+  for(let i=0;i<3;i++){
+    const ang = -0.5 + i*0.5 + performance.now()/900;
+    drawSwordShape(s.x+Math.cos(ang)*10, cy+Math.sin(ang)*10, ang, bp.pack.color, 20);
+  }
+  ctx.beginPath();
+  ctx.arc(s.x, cy, 17, 0, Math.PI*2);
+  ctx.fillStyle = "#0b0d14"; ctx.fill();
+  ctx.lineWidth=3; ctx.strokeStyle = bp.pack.color; ctx.shadowColor = bp.pack.color; ctx.shadowBlur = 16;
+  ctx.stroke(); ctx.shadowBlur = 0;
+  ctx.font="bold 12px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
+  ctx.fillStyle = bp.pack.color;
+  ctx.fillText("+"+bp.pack.amount, s.x, cy+1);
+  ctx.textBaseline="alphabetic";
+}
+
+function drawPoisonZone(z){
+  const s = worldToScreen(z.x,z.y);
+  ctx.beginPath();
+  ctx.arc(s.x,s.y,z.radius,0,Math.PI*2);
+  ctx.fillStyle = "rgba(123,217,58,0.16)";
+  ctx.fill();
+  ctx.lineWidth=2; ctx.strokeStyle="rgba(123,217,58,0.5)"; ctx.stroke();
+}
+
+function drawNova(n){
+  const s = worldToScreen(n.x,n.y);
+  ctx.beginPath();
+  ctx.arc(s.x,s.y,Math.max(1,n.radius),0,Math.PI*2);
+  ctx.strokeStyle = n.color; ctx.globalAlpha = clamp(n.life/n.maxLife,0,1)*0.8; ctx.lineWidth = 5;
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
+function drawLightning(l){
+  const a = worldToScreen(l.x1,l.y1), b = worldToScreen(l.x2,l.y2);
+  ctx.save();
+  ctx.globalAlpha = clamp(l.life/0.22,0,1);
+  ctx.strokeStyle = l.color; ctx.lineWidth = 3; ctx.shadowColor = l.color; ctx.shadowBlur = 10;
+  ctx.beginPath();
+  const midx=(a.x+b.x)/2 + rand(-14,14), midy=(a.y+b.y)/2 + rand(-14,14);
+  ctx.moveTo(a.x,a.y); ctx.lineTo(midx,midy); ctx.lineTo(b.x,b.y);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawGrid(){
+  const size = 100;
+  ctx.strokeStyle = "rgba(255,255,255,0.045)";
+  ctx.lineWidth = 1;
+  const startX = -((camera.x - canvas.width/2) % size);
+  const startY = -((camera.y - canvas.height/2) % size);
+  ctx.beginPath();
+  for(let x=startX; x<canvas.width; x+=size){ ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); }
+  for(let y=startY; y<canvas.height; y+=size){ ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); }
+  ctx.stroke();
+}
+
+function drawWorldBounds(){
+  const tl = worldToScreen(0,0);
+  ctx.strokeStyle = "rgba(255,91,91,0.5)";
+  ctx.lineWidth = 4;
+  ctx.strokeRect(tl.x, tl.y, world.w, world.h);
+}
+
+function drawSwordShape(x,y,angle,color,len){
+  ctx.save();
+  ctx.translate(x,y);
+  ctx.rotate(angle);
+  ctx.beginPath();
+  ctx.moveTo(len*0.6,0);
+  ctx.lineTo(0,-len*0.22);
+  ctx.lineTo(-len*0.5,0);
+  ctx.lineTo(0,len*0.22);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.shadowColor = color; ctx.shadowBlur = 8;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.restore();
+}
+
+function drawOrbitSwords(p, screen){
+  const R = orbitRadius(p);
+  for(let i=0;i<p.swords.length;i++){
+    const angle = p.spinAngle + (i/p.swords.length)*Math.PI*2;
+    const sx = screen.x + Math.cos(angle)*R;
+    const sy = screen.y + Math.sin(angle)*R;
+    drawSwordShape(sx, sy, angle, p.swords[i].color, 34);
+  }
+}
+
+function drawPlayer(p, color, name, isMe){
+  const s = worldToScreen(p.x,p.y);
+  drawOrbitSwords(p, s);
+
+  const flash = isMe && (performance.now()-p.lastHitAt < 150);
+  ctx.beginPath();
+  ctx.arc(s.x,s.y,p.radius,0,Math.PI*2);
+  ctx.fillStyle = flash? "#ffffff" : color;
+  ctx.fill();
+  ctx.lineWidth=3; ctx.strokeStyle="rgba(0,0,0,0.4)"; ctx.stroke();
+
+  // facing indicator
+  ctx.beginPath();
+  ctx.moveTo(s.x+Math.cos(p.facing)*p.radius, s.y+Math.sin(p.facing)*p.radius);
+  ctx.lineTo(s.x+Math.cos(p.facing-2.6)*p.radius*0.5, s.y+Math.sin(p.facing-2.6)*p.radius*0.5);
+  ctx.lineTo(s.x+Math.cos(p.facing+2.6)*p.radius*0.5, s.y+Math.sin(p.facing+2.6)*p.radius*0.5);
+  ctx.closePath(); ctx.fillStyle="rgba(255,255,255,0.35)"; ctx.fill();
+
+  // name + hp bar
+  ctx.font = "bold 12px sans-serif"; ctx.textAlign="center";
+  ctx.fillStyle="#fff";
+  ctx.fillText(name+" · Lv"+p.level, s.x, s.y-p.radius-22);
+  const bw=44, bh=5;
+  ctx.fillStyle="rgba(0,0,0,0.4)"; ctx.fillRect(s.x-bw/2, s.y-p.radius-16, bw, bh);
+  const hpPct = clamp(p.hp/p.maxHp,0,1);
+  ctx.fillStyle = hpPct>0.4? "#51cf66":"#ff5b5b";
+  ctx.fillRect(s.x-bw/2, s.y-p.radius-16, bw*hpPct, bh);
+}
+
+function drawRemotePlayer(rp){
+  const s = worldToScreen(rp.x, rp.y);
+  if(s.x<-80||s.x>canvas.width+80||s.y<-80||s.y>canvas.height+80) return;
+  // spin angle only arrives every ~90ms too — extrapolate it forward client-side (spin speed is
+  // purely a function of level) so the orbiting blades keep spinning smoothly between packets
+  const spinNow = (rp.spinBase||0) + spinSpeed({level:rp.level||1})*((performance.now()-(rp.spinBaseT||performance.now()))/1000);
+  const R = rp.orbitR || (BASE_ORBIT_RADIUS + ((rp.swordCount||1)-1)*ORBIT_RADIUS_PER_SWORD);
+  for(let i=0;i<(rp.swordCount||0);i++){
+    const angle = spinNow + (i/(rp.swordCount||1))*Math.PI*2;
+    const sx = s.x + Math.cos(angle)*R;
+    const sy = s.y + Math.sin(angle)*R;
+    drawSwordShape(sx, sy, angle, "#9aa8ff", 30);
+  }
+  ctx.beginPath(); ctx.arc(s.x,s.y,16,0,Math.PI*2);
+  ctx.fillStyle = rp.color || "#88f"; ctx.fill();
+  ctx.lineWidth=3; ctx.strokeStyle="rgba(0,0,0,0.4)"; ctx.stroke();
+  ctx.font="bold 12px sans-serif"; ctx.textAlign="center"; ctx.fillStyle="#fff";
+  ctx.fillText((rp.name||"?")+" · Lv"+(rp.level||1), s.x, s.y-34);
+  const bw=40,bh=4;
+  ctx.fillStyle="rgba(0,0,0,0.4)"; ctx.fillRect(s.x-bw/2, s.y-28, bw, bh);
+  const pct = clamp((rp.hp||0)/(rp.maxHp||100),0,1);
+  ctx.fillStyle = pct>0.4?"#51cf66":"#ff5b5b";
+  ctx.fillRect(s.x-bw/2, s.y-28, bw*pct, bh);
+}
+
+function drawCreep(c){
+  const s = worldToScreen(c.x,c.y);
+  if(s.x<-90||s.x>canvas.width+90||s.y<-90||s.y>canvas.height+90) return;
+  if(c.boss){ drawBoss(c, s); return; }
+  if(c.swordsman){ drawSwordsmanCreep(c, s); return; }
+  ctx.beginPath(); ctx.arc(s.x,s.y,c.radius,0,Math.PI*2);
+  ctx.fillStyle = c.brute? "#a13b3b" : "#5c6b8a";
+  ctx.fill();
+  ctx.lineWidth=2; ctx.strokeStyle="rgba(0,0,0,0.4)"; ctx.stroke();
+  const bw=c.radius*2, bh=4;
+  ctx.fillStyle="rgba(0,0,0,0.5)"; ctx.fillRect(s.x-bw/2, s.y-c.radius-10, bw, bh);
+  ctx.fillStyle="#ff5b5b"; ctx.fillRect(s.x-bw/2, s.y-c.radius-10, bw*clamp(c.hp/c.maxHp,0,1), bh);
+}
+
+function drawSwordsmanCreep(c, s){
+  const R = creepOrbitRadius(c);
+  for(let j=0;j<c.swords.length;j++){
+    const angle = c.spinAngle + (j/c.swords.length)*Math.PI*2;
+    const sx = s.x + Math.cos(angle)*R;
+    const sy = s.y + Math.sin(angle)*R;
+    drawSwordShape(sx, sy, angle, c.swords[j].color, 26);
+  }
+  ctx.beginPath(); ctx.arc(s.x,s.y,c.radius,0,Math.PI*2);
+  ctx.fillStyle = "#3d2b52";
+  ctx.fill();
+  ctx.lineWidth=2; ctx.strokeStyle="#b563ff"; ctx.stroke();
+  const bw=c.radius*2, bh=4;
+  ctx.fillStyle="rgba(0,0,0,0.5)"; ctx.fillRect(s.x-bw/2, s.y-c.radius-10, bw, bh);
+  ctx.fillStyle="#ff5b5b"; ctx.fillRect(s.x-bw/2, s.y-c.radius-10, bw*clamp(c.hp/c.maxHp,0,1), bh);
+}
+
+function drawBoss(c, s){
+  const pulse = 1 + Math.sin(performance.now()/220)*0.06;
+  // pulsing dark-red aura
+  ctx.beginPath();
+  ctx.arc(s.x, s.y, c.radius*pulse*1.35, 0, Math.PI*2);
+  ctx.fillStyle = "rgba(200,20,40,0.18)";
+  ctx.fill();
+  // spiky body — a jagged star instead of a plain circle, reads as way more threatening
+  const spikes = 10;
+  ctx.beginPath();
+  for(let i=0;i<spikes*2;i++){
+    const ang = (i/(spikes*2))*Math.PI*2;
+    const r = c.radius*pulse*(i%2===0 ? 1 : 0.78);
+    const px = s.x+Math.cos(ang)*r, py = s.y+Math.sin(ang)*r;
+    if(i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
+  }
+  ctx.closePath();
+  ctx.fillStyle = "#5a0d1a";
+  ctx.shadowColor = "#ff2d4d"; ctx.shadowBlur = 22;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.lineWidth = 3; ctx.strokeStyle = "#ff5b6d"; ctx.stroke();
+  // eyes
+  ctx.fillStyle = "#ffd43b";
+  ctx.beginPath(); ctx.arc(s.x-10, s.y-4, 4, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(s.x+10, s.y-4, 4, 0, Math.PI*2); ctx.fill();
+  if(c.shieldActive){
+    ctx.beginPath(); ctx.arc(s.x, s.y, c.radius*1.55, 0, Math.PI*2);
+    ctx.strokeStyle = "rgba(120,220,255,0.85)"; ctx.lineWidth = 4; ctx.stroke();
+  }
+}
+
+function drawPickup(pu){
+  const s = worldToScreen(pu.x,pu.y);
+  if(s.x<-40||s.x>canvas.width+40||s.y<-40||s.y>canvas.height+40) return;
+  const bob = Math.sin(performance.now()/300 + pu.x)*4;
+  drawSwordShape(s.x, s.y+bob, performance.now()/600, pu.tier.color, 26);
+}
+
+function drawFloater(f){
+  const s = worldToScreen(f.x,f.y);
+  ctx.globalAlpha = clamp(f.life/0.9,0,1);
+  ctx.font="bold 13px sans-serif"; ctx.textAlign="center";
+  ctx.fillStyle = f.color;
+  ctx.fillText(f.text, s.x, s.y);
+  ctx.globalAlpha = 1;
+}
+
+/* ================= HUD ================= */
+function updateHUD(){
+  document.getElementById("hudName").textContent = playerName;
+  document.getElementById("hudLevel").textContent = "Lv "+player.level;
+  document.getElementById("hpbar").style.width = clamp(player.hp/player.maxHp,0,1)*100+"%";
+  const needed = expForLevel(player.level);
+  document.getElementById("expbar").style.width = clamp(player.exp/needed,0,1)*100+"%";
+  document.getElementById("hudSwords").textContent = player.swords.length+"/"+MAX_SWORDS;
+  document.getElementById("hudKills").textContent = kills;
+  document.getElementById("hudTimer").textContent = fmtTime(elapsed);
+  document.getElementById("hudMode").textContent = mode==="survival"?"SURVIVAL":"ARENA";
+
+  if(mode==="multiplayer"){
+    const rosterBox = document.getElementById("roster");
+    rosterBox.classList.remove("hidden");
+    document.getElementById("chatBox").classList.remove("hidden");
+    const list = [{name:playerName+" (kamu)", level:player.level, pvp:pvpMode}];
+    for(const [id,rp] of remotePlayers) list.push({name:rp.name||"?", level:rp.level||1, pvp: rp.pvp!==false});
+    list.sort((a,b)=>b.level-a.level);
+    document.getElementById("rosterList").innerHTML = list.slice(0,8).map(r=>
+      `<div class="roster-row"><span>${r.pvp?"⚔":"🤝"} ${escapeHtml(r.name)}</span><span>Lv${r.level}</span></div>`
+    ).join("");
+  } else {
+    document.getElementById("roster").classList.add("hidden");
+    document.getElementById("chatBox").classList.add("hidden");
+  }
+
+  updateSkillBarUI();
+  updateBossBarUI();
+  drawMinimap();
+}
+
+function updateBossBarUI(){
+  const box = document.getElementById("bossbar");
+  const boss = creeps.find(c=>c.boss && c.hp>0);
+  if(!boss){ box.classList.add("hidden"); return; }
+  box.classList.remove("hidden");
+  const shownMax = Math.round(boss.maxHp);
+  const shownHp = Math.min(shownMax, Math.max(0, Math.round(boss.hp)));
+  const pdef = BOSS_PASSIVES.find(b=>b.key===boss.passive);
+  const tag = (pdef? " "+pdef.icon : "") + (boss.shieldActive? " 🛡️" : "");
+  document.getElementById("bossName").textContent = boss.name+tag+" — "+shownHp+" / "+shownMax;
+  document.getElementById("bossbar-fill").style.width = clamp(boss.hp/boss.maxHp,0,1)*100+"%";
+}
+
+function drawMinimap(){
+  const w = minimapCanvas.width, h = minimapCanvas.height;
+  mctx.clearRect(0,0,w,h);
+  mctx.fillStyle = "rgba(10,12,20,0.5)";
+  mctx.fillRect(0,0,w,h);
+  const sx = w/world.w, sy = h/world.h;
+
+  // faint grid so the map reads as a place, not just a void
+  mctx.strokeStyle = "rgba(255,255,255,0.06)"; mctx.lineWidth = 1;
+  for(let gx=0; gx<=w; gx+=w/4){ mctx.beginPath(); mctx.moveTo(gx,0); mctx.lineTo(gx,h); mctx.stroke(); }
+  for(let gy=0; gy<=h; gy+=h/4){ mctx.beginPath(); mctx.moveTo(0,gy); mctx.lineTo(w,gy); mctx.stroke(); }
+
+  // other players (multiplayer arena) so you can see rivals too, not just PvE threats
+  if(mode==="multiplayer"){
+    for(const [id,rp] of remotePlayers){
+      mctx.beginPath();
+      mctx.arc(rp.x*sx, rp.y*sy, 3, 0, Math.PI*2);
+      mctx.fillStyle = rp.color || "#88f";
+      mctx.fill();
+    }
+  }
+
+  // every enemy on the map, color-coded by threat type
+  for(const c of creeps){
+    if(c.hp<=0) continue;
+    let r = 2, color = "#8a93b3";
+    if(c.brute){ r = 2.6; color = "#ff6b6b"; }
+    if(c.swordsman){ r = 2.8; color = "#c58bff"; }
+    if(c.boss){ r = 5; color = "#ff2d4d"; }
+    mctx.beginPath();
+    mctx.arc(c.x*sx, c.y*sy, r, 0, Math.PI*2);
+    mctx.fillStyle = color;
+    if(c.boss){ mctx.shadowColor = "#ff2d4d"; mctx.shadowBlur = 6; }
+    mctx.fill();
+    mctx.shadowBlur = 0;
+  }
+
+  // player marker drawn last so it always stands out on top
+  mctx.beginPath();
+  mctx.arc(player.x*sx, player.y*sy, 3.6, 0, Math.PI*2);
+  mctx.fillStyle = "#ffffff";
+  mctx.fill();
+  mctx.lineWidth = 1.5; mctx.strokeStyle = "#4dabf7"; mctx.stroke();
+
+  mctx.strokeStyle = "rgba(255,255,255,0.18)"; mctx.lineWidth = 1;
+  mctx.strokeRect(0.5,0.5,w-1,h-1);
+}
+
+const skillSlotEls = [0,1,2].map(i=>document.querySelector(`.skillslot[data-slot="${i}"]`));
+function updateSkillBarUI(){
+  const now = performance.now();
+  for(let i=0;i<3;i++){
+    const el = skillSlotEls[i];
+    if(!el) continue;
+    const slot = player.skills[i];
+    const iconEl = el.querySelector(".skill-icon");
+    const cdEl = el.querySelector(".skill-cd");
+    if(!slot){
+      el.classList.add("empty"); el.classList.remove("ready");
+      iconEl.textContent = "?";
+      el.style.borderColor = "#333955";
+      cdEl.textContent = "";
+      continue;
+    }
+    const def = skillByKey(slot.key);
+    el.classList.remove("empty");
+    iconEl.textContent = def.icon;
+    el.style.borderColor = def.color;
+    const remain = (slot.cooldownUntil-now)/1000;
+    if(remain > 0){
+      el.classList.remove("ready");
+      cdEl.textContent = Math.ceil(remain);
+    } else {
+      el.classList.add("ready");
+      cdEl.textContent = "";
+    }
+    el.title = def.label+" Lv"+slot.level+" — "+def.desc;
+  }
+}
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+/* ================= LIFECYCLE ================= */
+let resultsShown = false;
+
+function hideAllScreens(){
+  document.querySelectorAll(".app-screen").forEach(el=>el.classList.add("hidden"));
+  document.getElementById("playModal").classList.add("hidden");
+}
+
+function startGame(selMode, roomCodeOverride){
+  ensureAudio();
+  // playerName is already resolved by the auth/guest flow before we ever reach this screen
+  mode = selMode;
+  world = selMode==="survival"? {w:4000,h:4000} : {w:2400,h:2400};
+  player = newPlayer();
+  player.x = world.w/2; player.y = world.h/2;
+  creeps = []; pickups = []; skillOrbs = []; bladePacks = []; particles = []; floaters = [];
+  lightnings = []; novaEffects = []; poisonZones = [];
+  Object.keys(state).forEach(k=>delete state[k]);
+  elapsed = 0; kills = 0; spawnTimer = 0; resultsShown = false; nextBossAt = BOSS_FIRST_AT; announcedWave = 1;
+  remotePlayers.clear();
+  roomIsActive = false; roomIsCreator = false; roomEnded = false; deathCount = 0;
+  roomStatsSnapshot = { kills:0, points:0, deaths:0 }; lastRoomFlush = 0;
+  document.getElementById("chatLog").innerHTML = "";
+
+  hideAllScreens();
+  document.getElementById("results").classList.add("hidden");
+  document.getElementById("hud").classList.remove("hidden");
+  document.getElementById("skillbar").classList.remove("hidden");
+  document.getElementById("exitBtn").classList.remove("hidden");
+  document.getElementById("exitModal").classList.add("hidden");
+
+  if(selMode==="multiplayer"){ connectMultiplayer(roomCodeOverride); }
+  else { document.getElementById("connstatus").classList.add("hidden"); }
+
+  running = true; lastT = 0;
+  requestAnimationFrame(loop);
+}
+
+function onPlayerDeath(){
+  running = false;
+  resultsShown = true;
+  playDeath();
+  // multiplayer no longer auto-disconnects on death — the shared room (boss, timer, other players)
+  // keeps running regardless; "Main Lagi" respawns in place, "Kembali ke Menu" is the real exit.
+  if(mode==="multiplayer"){
+    deathCount++;
+    if(roomIsActive) flushRoomStats(); // report the death right away instead of waiting for the periodic tick
+  }
+  document.getElementById("resTitle").textContent = mode==="survival"? "Kamu Tumbang!" : "Kamu Kalah!";
+  document.getElementById("resTime").textContent = fmtTime(elapsed);
+  document.getElementById("resLevel").textContent = player.level;
+  document.getElementById("resKills").textContent = kills;
+  document.getElementById("resPoints").textContent = computePoints(player.level, kills, Math.floor(elapsed));
+  document.getElementById("scoreStatus").textContent = "";
+  document.getElementById("results").classList.remove("hidden");
+  document.getElementById("btnRespawnRoom").classList.toggle("hidden", mode!=="multiplayer");
+  document.getElementById("hud").classList.add("hidden");
+  document.getElementById("skillbar").classList.add("hidden");
+  document.getElementById("exitBtn").classList.add("hidden");
+  logMatchHistory();
+  if(mode==="survival") submitScore(); // auto-kirim skor, progress tertinggi per player_id yang kesimpen
+}
+
+/* ================= EXIT / PAUSE ================= */
+function exitToMenu(){
+  document.getElementById("hud").classList.add("hidden");
+  document.getElementById("skillbar").classList.add("hidden");
+  document.getElementById("exitBtn").classList.add("hidden");
+  document.getElementById("exitModal").classList.add("hidden");
+  document.getElementById("connstatus").classList.add("hidden");
+  document.getElementById("results").classList.add("hidden");
+  enterProfile();
+}
+document.getElementById("exitBtn").addEventListener("click", ()=>{
+  if(!running) return; // already dead/paused
+  running = false; // pause the loop in place
+  document.getElementById("roomControls").classList.toggle("hidden", !(mode==="multiplayer" && roomIsActive && roomIsCreator && !roomEnded));
+  document.getElementById("exitModal").classList.remove("hidden");
+});
+document.getElementById("btnResumeGame").addEventListener("click", ()=>{
+  document.getElementById("exitModal").classList.add("hidden");
+  if(!player || player.dead) return;
+  running = true; lastT = 0;
+  requestAnimationFrame(loop);
+});
+document.getElementById("btnConfirmExit").addEventListener("click", async (e)=>{
+  const btn = e.currentTarget;
+  if(mode==="survival" && player && !player.dead){
+    btn.disabled = true; btn.textContent = "Menyimpan…";
+    await submitScore(); // simpan progress sebelum keluar
+    btn.disabled = false; btn.textContent = "Simpan & Keluar";
+  }
+  if(mode==="multiplayer" && roomIsActive) await flushRoomStats(); // jangan sampai beberapa detik terakhir hilang
+  document.getElementById("exitModal").classList.add("hidden");
+  if(mode==="multiplayer") disconnectMultiplayer();
+  exitToMenu();
+});
+document.getElementById("btnEndRoom").addEventListener("click", async (e)=>{
+  const btn = e.currentTarget;
+  if(!sb || !roomIsActive || !roomIsCreator || roomEnded) return;
+  btn.disabled = true; btn.textContent = "Mengakhiri…";
+  try{
+    const { data, error } = await sb.rpc("room_end_bladewar", { p_room: roomCode, p_player_id: myPlayerId });
+    if(error) throw error;
+    if(data && data.ok){
+      roomEnded = true;
+      if(channel) channel.send({type:"broadcast", event:"roomEnded", payload:{ room: roomCode }});
+      await submitScore(); // fold this room's result into the survival leaderboard too
+      await logMatchHistory();
+      document.getElementById("exitModal").classList.add("hidden");
+      showRoomSummary(roomCode, "Kamu mengakhiri room ini.");
+    }
+  }catch(e){
+    console.warn("end room failed", e);
+  }
+  btn.disabled = false; btn.textContent = "🏁 Akhiri Room";
+});
+document.getElementById("btnRespawnRoom").addEventListener("click", ()=>{
+  document.getElementById("results").classList.add("hidden");
+  document.getElementById("hud").classList.remove("hidden");
+  document.getElementById("skillbar").classList.remove("hidden");
+  document.getElementById("exitBtn").classList.remove("hidden");
+  // only the local player object resets — elapsed/kills/creeps/boss/room all keep going untouched,
+  // so this really is "die and get back up", not a fresh game
+  player = newPlayer();
+  player.x = clamp(rand(0,world.w), 80, world.w-80);
+  player.y = clamp(rand(0,world.h), 80, world.h-80);
+  resultsShown = false;
+  showBanner("Kamu respawn — room tetap jalan!");
+  running = true; lastT = 0;
+  requestAnimationFrame(loop);
+});
+document.getElementById("btnCloseRoomSummary").addEventListener("click", ()=>{
+  document.getElementById("roomSummaryModal").classList.add("hidden");
+  if(mode==="multiplayer") disconnectMultiplayer();
+  exitToMenu();
+});
+
+/* ================= CHAT (multiplayer only, session-only, nothing persisted) ================= */
+const CHAT_MAX_LINES = 30;
+const CHAT_IDLE_MS = 3000; // how long the box stays fully open after the last activity before it minimizes back down
+let chatIdleTimer = null;
+function chatExpand(){
+  document.getElementById("chatBox").classList.remove("chat-collapsed");
+  clearTimeout(chatIdleTimer);
+  chatIdleTimer = setTimeout(chatCollapse, CHAT_IDLE_MS);
+}
+function chatCollapse(){
+  // don't minimize while the player is actively typing — only once they've stepped away
+  if(document.activeElement === document.getElementById("chatInput")) return;
+  document.getElementById("chatBox").classList.add("chat-collapsed");
+}
+function addChatLine(name, text, isMe){
+  const log = document.getElementById("chatLog");
+  const line = document.createElement("div");
+  line.className = "chat-line" + (isMe? " me" : "");
+  line.innerHTML = `<b>${escapeHtml(name)}:</b> ${escapeHtml(text)}`;
+  log.appendChild(line);
+  while(log.children.length > CHAT_MAX_LINES) log.removeChild(log.firstChild);
+  log.scrollTop = log.scrollHeight;
+  chatExpand(); // pop open to show the new line, then auto-minimize again after a few quiet seconds
+}
+document.getElementById("chatInput").addEventListener("focus", chatExpand);
+document.getElementById("chatForm").addEventListener("submit", (e)=>{
+  e.preventDefault();
+  const input = document.getElementById("chatInput");
+  const text = input.value.trim().slice(0,80);
+  input.value = "";
+  chatExpand();
+  if(!text || mode!=="multiplayer" || !channel) return;
+  addChatLine(playerName+" (kamu)", text, true); // broadcast self:false — show our own line locally right away
+  channel.send({type:"broadcast", event:"chat", payload:{ name:playerName, text }});
+});
+// start minimized — it pops open the moment a message arrives or the player taps into it
+chatCollapse();
+
+/* ================= MENU GALLERIES (always visible on the main menu now) ================= */
+const ENEMY_INFO = [
+  { key:"normal", label:"Creep", color:"#8a93b3", icon:"◆",
+    desc:"Musuh dasar yang ngejar dan nabrak kamu. Gampang dikalahin, kadang drop pedang." },
+  { key:"brute", label:"Brute", color:"#ff6b6b", icon:"●",
+    desc:"HP lebih tebal dan pukulannya sakit. Hampir selalu drop pedang bagus kalau berhasil dikalahin." },
+  { key:"swordsman", label:"Musuh Bersenjata", color:"#c58bff", icon:"⚔️",
+    desc:"Punya blade sendiri yang ikut muter. Bisa ambil pedang di field buat naikin kekuatan, dan bisa beradu blade — yang lebih lemah bakal pecah." },
+  { key:"boss", label:"Boss", color:"#ff2d4d", icon:"💀",
+    desc:"HP dan damage-nya besar, dan tiap muncul dapet 1 skill pasif acak (Regenerasi/Amukan/Gelombang Kejut/Panggilan/Perisai) biar tiap fight kerasa beda. Di multiplayer boss-nya sama persis buat semua pemain. Selalu drop Blade Pack + pedang bagus kalau dikalahin." },
+];
+function renderEnemyGallery(){
+  document.getElementById("enemyGallery").innerHTML = ENEMY_INFO.map(e=>`
+    <div class="gitem" style="border-left-color:${e.color}">
+      <div class="gitem-icon" style="color:${e.color}">${e.icon}</div>
+      <div class="gitem-body">
+        <h4 style="color:${e.color}">${e.label}</h4>
+        <p>${e.desc}</p>
+      </div>
+    </div>`).join("");
+}
+function renderSwordGallery(){
+  document.getElementById("swordGallery").innerHTML = SWORD_TIERS.map(t=>`
+    <div class="gitem" style="border-left-color:${t.color}">
+      <div class="gitem-icon" style="color:${t.color}">⚔️</div>
+      <div class="gitem-body">
+        <h4 style="color:${t.color}">${t.label}</h4>
+        <div class="meta">Damage dasar: ${t.dmg}${t.lifesteal? " · Lifesteal "+Math.round(t.lifesteal*100)+"%" : ""}</div>
+        <p>${t.desc}</p>
+      </div>
+    </div>`).join("");
+}
+function renderSkillGallery(){
+  document.getElementById("skillGallery").innerHTML = `<div style="font-size:11px; color:var(--text-dim); margin-bottom:8px; line-height:1.4;">
+      3 slot skill, didapat dari orb di field, cuma berlaku selama game jalan. Semua skill <b>pasif</b> — otomatis aktif sendiri tiap cooldown, nggak perlu ditekan.
+    </div>` + SKILLS.map(s=>`
+    <div class="gitem" style="border-left-color:${s.color}">
+      <div class="gitem-icon" style="color:${s.color}">${s.icon}</div>
+      <div class="gitem-body">
+        <h4 style="color:${s.color}">${s.label}</h4>
+        <div class="meta">Cooldown: ${(s.cooldown/1000).toFixed(0)}s</div>
+        <p>${s.desc}</p>
+      </div>
+    </div>`).join("");
+}
+renderEnemyGallery();
+renderSwordGallery();
+renderSkillGallery();
+
+/* ================= MULTIPLAYER MODE TOGGLE ================= */
+document.getElementById("btnModeVersus").addEventListener("click", ()=>{
+  pvpMode = true;
+  document.getElementById("btnModeVersus").classList.add("active");
+  document.getElementById("btnModeCoop").classList.remove("active");
+});
+document.getElementById("btnModeCoop").addEventListener("click", ()=>{
+  pvpMode = false;
+  document.getElementById("btnModeCoop").classList.add("active");
+  document.getElementById("btnModeVersus").classList.remove("active");
+});
+
+document.getElementById("btnBackMenu").addEventListener("click", ()=>{
+  if(mode==="multiplayer") disconnectMultiplayer();
+  exitToMenu();
+});
+
+async function submitScore(){
+  const statusEl = document.getElementById("scoreStatus");
+  if(!sb){ if(statusEl) statusEl.textContent = ""; return; }
+  if(statusEl){ statusEl.textContent = "Mengirim skor…"; }
+  try{
+    // pakai RPC: hanya menimpa skor lama (player_id sama) kalau progress baru lebih tinggi
+    const { error } = await sb.rpc("submit_leaderboard_bladewar", {
+      p_player_id: myPlayerId,
+      p_name: playerName,
+      p_level: player.level,
+      p_time: Math.floor(elapsed),
+      p_kills: kills,
+    });
+    if(error) throw error;
+    if(statusEl){ statusEl.textContent = "Skor terkirim ✓"; }
+    loadLeaderboard();
+  }catch(e){
+    console.warn("submit score failed", e);
+    if(statusEl){ statusEl.textContent = ""; }
+  }
+}
+
+/* ================= LEADERBOARD & MATCH HISTORY (profile screen) ================= */
+async function loadLeaderboard(){
+  const box = document.getElementById("lbList");
+  if(!box) return;
+  if(!sb){ box.innerHTML = '<div class="lb-empty">Supabase tidak tersedia.</div>'; return; }
+  try{
+    const { data, error } = await sb.from("leaderboard_bladewar")
+      .select("name,level,time_survived,kills,score")
+      .order("score", {ascending:false})
+      .limit(10);
+    if(error) throw error;
+    if(!data || data.length===0){ box.innerHTML = '<div class="lb-empty">Belum ada skor. Jadilah yang pertama!</div>'; return; }
+    box.innerHTML = data.map((row,i)=>
+      `<div class="lb-row"><span>${i+1}.</span><span style="flex:1">${escapeHtml(row.name)}</span><span>Lv${row.level} · ${fmtTime(row.time_survived)} · <b>${row.score ?? 0} pt</b></span></div>`
+    ).join("");
+  }catch(e){
+    console.warn("leaderboard load failed", e);
+    box.innerHTML = '<div class="lb-empty">Belum ada tabel skor di Supabase (lihat setup SQL).</div>';
+  }
+}
+
+async function logMatchHistory(){
+  if(!sb || !player) return;
+  try{
+    await sb.rpc("log_match_bladewar", {
+      p_player_id: myPlayerId, p_name: playerName, p_mode: mode,
+      p_level: player.level, p_time: Math.floor(elapsed), p_kills: kills,
+    });
+  }catch(e){ console.warn("log match history failed", e); }
+}
+
+async function loadMatchHistory(){
+  const box = document.getElementById("matchHistoryList");
+  if(!box) return;
+  if(!sb){ box.innerHTML = '<div class="lb-empty">Supabase tidak tersedia.</div>'; return; }
+  try{
+    const { data, error } = await sb.from("match_history_bladewar")
+      .select("mode,level,time_survived,kills,points,created_at")
+      .eq("player_id", myPlayerId)
+      .order("created_at", {ascending:false})
+      .limit(10);
+    if(error) throw error;
+    if(!data || data.length===0){ box.innerHTML = '<div class="lb-empty">Belum ada riwayat main.</div>'; return; }
+    box.innerHTML = data.map(row=>
+      `<div class="lb-row"><span>${row.mode==="multiplayer"?"🌐":"⚔"}</span><span style="flex:1">Lv${row.level} · ${fmtTime(row.time_survived)} · ${row.kills} kill</span><span><b>${row.points} pt</b></span></div>`
+    ).join("");
+  }catch(e){
+    console.warn("match history load failed", e);
+    box.innerHTML = '<div class="lb-empty">Belum ada tabel riwayat di Supabase (lihat setup SQL).</div>';
+  }
+}
+
+/* ================= SCREEN NAVIGATION ================= */
+function hideAllScreensNav(){
+  document.querySelectorAll(".app-screen").forEach(el=>el.classList.add("hidden"));
+  document.getElementById("playModal").classList.add("hidden");
+}
+function showScreen(id){ hideAllScreensNav(); document.getElementById(id).classList.remove("hidden"); }
+
+function enterProfile(){
+  document.getElementById("profileName").textContent = playerName + (isGuest? " (Tamu)" : "");
+  document.getElementById("profileAvatar").textContent = (playerName||"?").trim().charAt(0).toUpperCase() || "?";
+  document.getElementById("profileEmail").textContent = authUser
+    ? "@"+authUser.username
+    : "Main sebagai tamu — progress cuma kesimpen di device ini.";
+  showScreen("profileScreen");
+  document.getElementById("playModal").classList.add("hidden");
+  loadMatchHistory();
+  loadLeaderboard();
+}
+
+/* ================= AUTH (login / signup / guest) ================= */
+// Login/akun dipakai bareng sama game lain di project Supabase ini, yang nyimpen akun sebagai
+// "username@fishing-fps.local" (bukan email beneran). Jadi pemain cukup ngetik username-nya aja
+// (mis. "slendhun") — kalau yang diketik belum ada tanda @, kita otomatis tambahin domainnya di
+// belakang layar sebelum manggil Supabase Auth.
+const AUTH_EMAIL_DOMAIN = "fishing-fps.local";
+function normalizeAuthEmail(input){
+  input = (input||"").trim().toLowerCase();
+  if(!input) return "";
+  return input.includes("@") ? input : input+"@"+AUTH_EMAIL_DOMAIN;
+}
+function displayUsername(email){
+  if(!email) return "";
+  return email.toLowerCase().endsWith("@"+AUTH_EMAIL_DOMAIN) ? email.slice(0, -("@"+AUTH_EMAIL_DOMAIN).length) : email;
+}
+
+function setAuthMode(m){
+  authMode = m;
+  document.getElementById("tabLogin").classList.toggle("active", m==="login");
+  document.getElementById("tabSignup").classList.toggle("active", m==="signup");
+  document.getElementById("btnAuthSubmit").textContent = m==="signup" ? "Buat Akun" : "Masuk";
+  document.getElementById("authStatus").textContent = "";
+}
+document.getElementById("tabLogin").addEventListener("click", ()=>setAuthMode("login"));
+document.getElementById("tabSignup").addEventListener("click", ()=>setAuthMode("signup"));
+
+function onAuthSuccess(user){
+  const meta = user.user_metadata || {};
+  const username = displayUsername(user.email);
+  authUser = { id: user.id, email: user.email, username, name: (meta.display_name||username).slice(0,14) };
+  isGuest = false;
+  myPlayerId = authUser.id;
+  playerName = authUser.name;
+  enterProfile();
+}
+
+document.getElementById("authForm").addEventListener("submit", async (e)=>{
+  e.preventDefault();
+  const statusEl = document.getElementById("authStatus");
+  const btn = document.getElementById("btnAuthSubmit");
+  if(!sb){ statusEl.style.color = "#ff5b5b"; statusEl.textContent = "Supabase tidak tersedia — cek koneksi internet."; return; }
+  const rawInput = document.getElementById("authEmail").value.trim();
+  const password = document.getElementById("authPassword").value;
+  statusEl.style.color = "#ff5b5b";
+  // validasi sendiri (bukan pop-up bawaan browser yang bahasa Inggris & suka bikin bingung) —
+  // pesannya langsung tampil rapi di bawah form, bahasa Indonesia. Username cukup huruf/angka/._- ,
+  // atau boleh juga ketik email beneran kalau ada tanda @.
+  const looksLikeEmailAttempt = rawInput.includes("@");
+  const validUsername = /^[a-zA-Z0-9_.-]{3,20}$/.test(rawInput);
+  const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawInput);
+  if(!rawInput || (looksLikeEmailAttempt ? !validEmail : !validUsername)){
+    statusEl.textContent = looksLikeEmailAttempt
+      ? "Format email belum valid, contoh: nama@gmail.com"
+      : "Masukkan username kamu (3-20 huruf/angka), contoh: slendhun";
+    document.getElementById("authEmail").focus();
+    return;
+  }
+  if(!password || password.length < 6){
+    statusEl.textContent = "Password minimal 6 karakter.";
+    document.getElementById("authPassword").focus();
+    return;
+  }
+  const email = normalizeAuthEmail(rawInput);
+  btn.disabled = true;
+  statusEl.style.color = "var(--text-dim)";
+  try{
+    if(authMode==="signup"){
+      // user baru nggak perlu isi nama terpisah — nama tampilannya langsung dari username yang tadi diketik
+      const name = rawInput.trim().slice(0,14) || "Player";
+      statusEl.textContent = "Membuat akun…";
+      const { data, error } = await sb.auth.signUp({ email, password, options:{ data:{ display_name:name } } });
+      if(error) throw error;
+      if(data.session){ onAuthSuccess(data.session.user); }
+      else { statusEl.style.color="#6bffb0"; statusEl.textContent = "Akun dibuat! Cek email buat verifikasi, lalu masuk."; setAuthMode("login"); }
+    } else {
+      statusEl.textContent = "Masuk…";
+      const { data, error } = await sb.auth.signInWithPassword({ email, password });
+      if(error) throw error;
+      onAuthSuccess(data.user);
+    }
+  }catch(err){
+    console.warn("auth failed", err);
+    statusEl.style.color = "#ff5b5b";
+    statusEl.textContent = (err && err.message==="Invalid login credentials")
+      ? "Username atau password salah."
+      : ((err && err.message) || "Gagal, coba lagi.");
+  }
+  btn.disabled = false;
+});
+
+document.getElementById("btnGuestPlay").addEventListener("click", ()=>{
+  isGuest = true;
+  authUser = null;
+  myPlayerId = getPersistentPlayerId();
+  // user baru nggak perlu isi nama — langsung dikasih nama tamu otomatis, unik per device
+  // (dipertahankan sama tiap kali balik lagi, dari 4 karakter terakhir id tamu yang kesimpen)
+  playerName = "Tamu" + myPlayerId.slice(-4).toUpperCase();
+  enterProfile();
+});
+
+document.getElementById("btnLogout").addEventListener("click", async ()=>{
+  if(sb && authUser){ try{ await sb.auth.signOut(); }catch(e){} }
+  authUser = null; isGuest = false;
+  myPlayerId = getPersistentPlayerId();
+  document.getElementById("authEmail").value = ""; document.getElementById("authPassword").value = "";
+  showScreen("authScreen");
+});
+
+/* ================= "MAIN" POPUP: survival / multiplayer + room list, all in one card ================= */
+document.getElementById("btnOpenPlay").addEventListener("click", ()=>{
+  document.getElementById("playModalGreeting").textContent = "Halo, "+playerName+"! Main sendiri atau bareng-bareng?";
+  document.getElementById("playModal").classList.remove("hidden");
+  refreshRoomList(); // room list langsung kelihatan begitu popup dibuka — tinggal klik buat join
+});
+document.getElementById("btnClosePlayModal").addEventListener("click", ()=>{
+  document.getElementById("playModal").classList.add("hidden");
+});
+document.getElementById("btnGoSurvival").addEventListener("click", ()=>startGame("survival"));
+document.getElementById("btnCreateRoom").addEventListener("click", ()=>{
+  const code = "r"+Math.random().toString(36).slice(2,7);
+  startGame("multiplayer", code);
+});
+document.getElementById("btnRefreshRooms").addEventListener("click", refreshRoomList);
+
+async function refreshRoomList(){
+  const box = document.getElementById("roomList");
+  if(!sb){ box.innerHTML = '<div class="lb-empty">Supabase tidak tersedia.</div>'; return; }
+  box.innerHTML = '<div class="lb-empty">Memuat…</div>';
+  try{
+    const { data, error } = await sb.rpc("list_active_rooms_bladewar");
+    if(error) throw error;
+    if(!data || data.length===0){ box.innerHTML = '<div class="lb-empty">Belum ada room aktif. Bikin yang pertama!</div>'; return; }
+    box.innerHTML = data.map(r=>
+      `<div class="room-row" data-room="${escapeHtml(r.room_code)}">
+        <span>🚪 ${escapeHtml(r.room_code)}</span>
+        <span class="room-meta">${Math.floor((r.elapsed_seconds||0)/60)} menit · ${r.player_count} orang · Lv tertinggi ${r.top_level||1}</span>
+      </div>`
+    ).join("");
+    box.querySelectorAll(".room-row").forEach(el=>{
+      el.addEventListener("click", ()=>startGame("multiplayer", el.dataset.room));
+    });
+  }catch(e){
+    console.warn("room list load failed", e);
+    box.innerHTML = '<div class="lb-empty">Gagal memuat daftar room (lihat setup SQL).</div>';
+  }
+}
+
+/* ================= BOOT: restore an existing Supabase session, else show the login screen ================= */
+(async function boot(){
+  if(sb){
+    try{
+      const { data } = await sb.auth.getSession();
+      if(data && data.session && data.session.user){ onAuthSuccess(data.session.user); return; }
+    }catch(e){ console.warn("session restore failed", e); }
+  }
+  showScreen("authScreen");
+})();
+
+})();
+</script>
+</body>
+</html>
