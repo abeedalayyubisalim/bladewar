@@ -95,6 +95,17 @@
   .lb-row{ display:flex; justify-content:space-between; font-size: 13px; padding: 6px 0; color: var(--text); }
   .lb-row span:first-child{ color: var(--text-dim); width: 24px; display:inline-block;}
   .lb-empty{ font-size:12px; color:var(--text-dim); }
+
+  .level-row{ display:flex; justify-content:space-between; font-size:11px; color:var(--text-dim); margin-top:2px; }
+  .xp-bar-track{ width:100%; height:8px; border-radius:6px; background:#0f111c; border:1px solid #262b45; overflow:hidden; margin-top:4px; }
+  .xp-bar-fill{ height:100%; background:linear-gradient(135deg, #7db8ff, #4d7dff); border-radius:6px; transition:width .3s ease; }
+  .badge-grid{ display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+  .badge{
+    width:40px; height:40px; border-radius:10px; display:flex; align-items:center; justify-content:center;
+    font-size:19px; background:#171a2b; border:1px solid #262b45; cursor:default;
+  }
+  .badge.locked{ opacity:.28; filter:grayscale(1); }
+  .badge.unlocked{ background:linear-gradient(135deg, rgba(255,91,91,0.22), rgba(255,169,77,0.22)); border-color:var(--accent-2); }
   .room-row{
     display:flex; justify-content:space-between; align-items:center; font-size:13px; padding:10px 12px;
     margin-bottom:8px; border-radius:10px; background:#171a2b; border:1px solid #262b45; cursor:pointer;
@@ -354,16 +365,23 @@
   </div>
 </div>
 
-<!-- ================= SCREEN 2: profile (avatar+name card, match history & top survival to the right) ================= -->
+<!-- ================= SCREEN 2: profile (avatar+name+level+badges, history/leaderboard, online users) ================= -->
 <div id="profileScreen" class="app-screen hidden">
   <div class="menu-wrap">
     <div class="menu-card">
       <div class="title">BLADEWAR</div>
       <div class="profile-avatar" id="profileAvatar">?</div>
       <div class="subtitle" id="profileName" style="margin-bottom:2px;">Player</div>
-      <div class="sub" id="profileEmail" style="text-align:center; color:var(--text-dim); font-size:12px; margin-bottom:14px;"></div>
+      <div class="sub" id="profileEmail" style="text-align:center; color:var(--text-dim); font-size:12px; margin-bottom:10px;"></div>
+      <div class="level-row">
+        <span id="profileLevelLabel">Level Akun 1</span>
+        <span id="profileXpLabel">0 / 300 XP</span>
+      </div>
+      <div class="xp-bar-track"><div class="xp-bar-fill" id="profileXpFill" style="width:0%"></div></div>
       <button class="btn btn-mp" id="btnOpenPlay">▶ Main</button>
       <button class="btn btn-secondary" id="btnLogout">Keluar Akun</button>
+      <h3 style="margin:20px 0 0;">Achievement</h3>
+      <div class="badge-grid" id="badgeGrid"></div>
     </div>
     <div class="menu-col">
       <div class="side-panel">
@@ -373,6 +391,12 @@
       <div id="leaderboard">
         <h3>Top Survival</h3>
         <div id="lbList" class="panel-body"><div class="lb-empty">Memuat…</div></div>
+      </div>
+    </div>
+    <div class="menu-col">
+      <div class="side-panel" style="max-height:none;">
+        <h3>Pemain Online</h3>
+        <div id="onlineUsersList" class="panel-body"><div class="lb-empty">Memuat…</div></div>
       </div>
     </div>
   </div>
@@ -767,6 +791,8 @@ let world = { w: 4000, h: 4000 };
 let running = false;
 let elapsed = 0;
 let kills = 0;
+let bossKills = 0; // this match's boss kills, feeds the "Pembunuh Boss"/"Boss Hunter" achievements
+let progressBumpedThisMatch = false; // guards bump_player_stats_bladewar so one match only counts once
 let playerName = "Player";
 let myId = uid();
 let myColor = colorForId(myId);
@@ -1711,6 +1737,7 @@ function killCreep(c, killerId){
     kills++;
   }
   if(c.boss){
+    bossKills++;
     showBanner("💀 "+c.name+" TUMBANG!");
     playBossDeath();
     nextBossAt = elapsed + BOSS_INTERVAL; // schedule the next one from the moment this one falls
@@ -1813,6 +1840,7 @@ function connectMultiplayer(roomCodeOverride){
   channel.on("broadcast", {event:"roomEnded"}, ()=>{
     roomEnded = true;
     submitScore(); // fold my current progress into the survival leaderboard too, same as whoever ended it
+    bumpAccountProgress();
     showRoomSummary(roomCode, "Room ini baru saja diakhiri oleh pembuatnya.");
   });
 
@@ -1859,7 +1887,7 @@ function connectMultiplayer(roomCodeOverride){
     showBanner("💀 "+payload.name+" TUMBANG!");
     playBossDeath();
     gainExp(player, payload.expValue||140, payload.x, payload.y);
-    kills++;
+    kills++; bossKills++;
     bladePacks.push({ x:payload.x, y:payload.y, pack: pickBossBladePack(), id: uid() });
     for(let i=0;i<3;i++){
       pickups.push({ x:payload.x+rand(-40,40), y:payload.y+rand(-40,40), tier: weightedBruteTier(), id: uid() });
@@ -2631,7 +2659,7 @@ function startGame(selMode, roomCodeOverride){
   creeps = []; pickups = []; skillOrbs = []; bladePacks = []; particles = []; floaters = [];
   lightnings = []; novaEffects = []; poisonZones = [];
   Object.keys(state).forEach(k=>delete state[k]);
-  elapsed = 0; kills = 0; spawnTimer = 0; resultsShown = false; nextBossAt = BOSS_FIRST_AT; announcedWave = 1;
+  elapsed = 0; kills = 0; bossKills = 0; progressBumpedThisMatch = false; spawnTimer = 0; resultsShown = false; nextBossAt = BOSS_FIRST_AT; announcedWave = 1;
   remotePlayers.clear();
   roomIsActive = false; roomIsCreator = false; roomEnded = false; deathCount = 0;
   roomStatsSnapshot = { kills:0, points:0, deaths:0 }; lastRoomFlush = 0;
@@ -2674,6 +2702,7 @@ function onPlayerDeath(){
   document.getElementById("exitBtn").classList.add("hidden");
   logMatchHistory();
   if(mode==="survival") submitScore(); // auto-kirim skor, progress tertinggi per player_id yang kesimpen
+  bumpAccountProgress();
 }
 
 /* ================= EXIT / PAUSE ================= */
@@ -2706,6 +2735,7 @@ document.getElementById("btnConfirmExit").addEventListener("click", async (e)=>{
     btn.disabled = false; btn.textContent = "Simpan & Keluar";
   }
   if(mode==="multiplayer" && roomIsActive) await flushRoomStats(); // jangan sampai beberapa detik terakhir hilang
+  if(player && !player.dead) await bumpAccountProgress(); // hitung progress akun tiap keluar sambil masih hidup juga, bukan cuma waktu mati
   document.getElementById("exitModal").classList.add("hidden");
   if(mode==="multiplayer") disconnectMultiplayer();
   exitToMenu();
@@ -2722,6 +2752,7 @@ document.getElementById("btnEndRoom").addEventListener("click", async (e)=>{
       if(channel) channel.send({type:"broadcast", event:"roomEnded", payload:{ room: roomCode }});
       await submitScore(); // fold this room's result into the survival leaderboard too
       await logMatchHistory();
+      await bumpAccountProgress();
       document.getElementById("exitModal").classList.add("hidden");
       showRoomSummary(roomCode, "Kamu mengakhiri room ini.");
     }
@@ -2929,6 +2960,118 @@ async function loadMatchHistory(){
   }
 }
 
+/* ================= ACCOUNT PROGRESS: level akun, XP, achievement/badge (profile screen) =================
+   Ini TERPISAH dari "player.level" di dalam satu pertandingan (yang reset tiap main dari orb EXP di
+   lapangan). Level akun ini permanen per player_id: tiap pertandingan selesai, poin pertandingan itu
+   (formula sama kayak computePoints) ditambahkan ke total_points lewat RPC, dan level akun dihitung
+   dari total_points itu. Achievement/badge juga dihitung dari statistik kumulatif yang sama. */
+const ACCOUNT_XP_PER_LEVEL = 300;
+function accountLevelFromXp(xp){ return Math.floor(Math.max(0,xp||0) / ACCOUNT_XP_PER_LEVEL) + 1; }
+function accountXpIntoLevel(xp){ return Math.max(0,xp||0) % ACCOUNT_XP_PER_LEVEL; }
+
+let accountStats = { total_points:0, total_matches:0, total_kills:0, total_boss_kills:0, best_time_survived:0, best_level:1 };
+
+const ACHIEVEMENTS = [
+  { key:"first_blood", icon:"🩸", name:"Darah Pertama", desc:"Dapatkan kill pertamamu.", check: s => s.total_kills >= 1 },
+  { key:"warrior", icon:"⚔️", name:"Petarung", desc:"Kumpulkan 50 total kill.", check: s => s.total_kills >= 50 },
+  { key:"exterminator", icon:"💀", name:"Pembasmi", desc:"Kumpulkan 250 total kill.", check: s => s.total_kills >= 250 },
+  { key:"survivor", icon:"⏱️", name:"Penyintas", desc:"Bertahan 5 menit dalam satu pertandingan.", check: s => s.best_time_survived >= 300 },
+  { key:"legend_survivor", icon:"🏆", name:"Legenda Bertahan", desc:"Bertahan 15 menit dalam satu pertandingan.", check: s => s.best_time_survived >= 900 },
+  { key:"boss_slayer", icon:"👑", name:"Pembunuh Boss", desc:"Kalahkan boss pertamamu.", check: s => s.total_boss_kills >= 1 },
+  { key:"boss_hunter", icon:"🔥", name:"Boss Hunter", desc:"Kalahkan 10 boss.", check: s => s.total_boss_kills >= 10 },
+  { key:"high_level", icon:"⭐", name:"Naik Level", desc:"Capai level 10 dalam satu pertandingan.", check: s => s.best_level >= 10 },
+  { key:"loyal", icon:"🎮", name:"Pemain Setia", desc:"Mainkan 20 pertandingan.", check: s => s.total_matches >= 20 },
+  { key:"account_10", icon:"🥇", name:"Naik Pangkat", desc:"Capai Level Akun 10.", check: s => accountLevelFromXp(s.total_points) >= 10 },
+];
+
+function renderAccountProgress(){
+  const lvl = accountLevelFromXp(accountStats.total_points);
+  const into = accountXpIntoLevel(accountStats.total_points);
+  const lvlEl = document.getElementById("profileLevelLabel");
+  const xpEl = document.getElementById("profileXpLabel");
+  const fillEl = document.getElementById("profileXpFill");
+  if(lvlEl) lvlEl.textContent = "Level Akun "+lvl;
+  if(xpEl) xpEl.textContent = into+" / "+ACCOUNT_XP_PER_LEVEL+" XP";
+  if(fillEl) fillEl.style.width = Math.round((into/ACCOUNT_XP_PER_LEVEL)*100)+"%";
+  const grid = document.getElementById("badgeGrid");
+  if(grid){
+    grid.innerHTML = ACHIEVEMENTS.map(a=>{
+      const unlocked = a.check(accountStats);
+      return `<div class="badge ${unlocked?"unlocked":"locked"}" title="${escapeHtml(a.name)} — ${escapeHtml(a.desc)}">${a.icon}</div>`;
+    }).join("");
+  }
+}
+
+async function loadAccountProgress(){
+  if(!sb){ renderAccountProgress(); return; }
+  try{
+    const { data, error } = await sb.from("player_stats_bladewar")
+      .select("total_points,total_matches,total_kills,total_boss_kills,best_time_survived,best_level")
+      .eq("player_id", myPlayerId)
+      .maybeSingle();
+    if(error) throw error;
+    accountStats = data || { total_points:0, total_matches:0, total_kills:0, total_boss_kills:0, best_time_survived:0, best_level:1 };
+  }catch(e){
+    console.warn("account progress load failed (jalanin bladewar_setup_v2.sql kalau tabel belum ada)", e);
+    accountStats = { total_points:0, total_matches:0, total_kills:0, total_boss_kills:0, best_time_survived:0, best_level:1 };
+  }
+  renderAccountProgress();
+  if(lobbyChannel) lobbyChannel.track({ name: playerName, level: accountLevelFromXp(accountStats.total_points) });
+}
+
+// Dipanggil sekali tiap satu pertandingan berakhir (mati, keluar sambil nyimpen, atau akhiri room),
+// bareng-bareng sama submitScore()/logMatchHistory() — progressBumpedThisMatch mencegah kehitung dobel
+// kalau beberapa jalur keluar itu somehow kepanggil bareng buat pertandingan yang sama.
+async function bumpAccountProgress(){
+  if(progressBumpedThisMatch || !sb || !player) return;
+  progressBumpedThisMatch = true;
+  try{
+    const { data, error } = await sb.rpc("bump_player_stats_bladewar", {
+      p_player_id: myPlayerId, p_name: playerName,
+      p_dpoints: computePoints(player.level, kills, Math.floor(elapsed)),
+      p_dmatches: 1, p_dkills: kills, p_dboss_kills: bossKills,
+      p_time_survived: Math.floor(elapsed), p_level: player.level,
+    });
+    if(error) throw error;
+    if(data) accountStats = data;
+    renderAccountProgress();
+    if(lobbyChannel) lobbyChannel.track({ name: playerName, level: accountLevelFromXp(accountStats.total_points) });
+  }catch(e){ console.warn("bump account progress failed", e); }
+}
+
+/* ================= PEMAIN ONLINE (lobby presence, kolom paling kanan di profil) =================
+   Presence Supabase Realtime — bukan disimpan di tabel, cuma "siapa yang koneksinya lagi kebuka
+   sekarang". Di-join sekali tiap masuk profil (enterProfile), dan di-track ulang tiap nama/level
+   akun berubah biar yang lain lihat info paling baru. */
+let lobbyChannel = null;
+function joinLobbyPresence(){
+  if(!sb) return;
+  if(lobbyChannel){ try{ sb.removeChannel(lobbyChannel); }catch(e){} lobbyChannel = null; }
+  lobbyChannel = sb.channel("bladewar-lobby", { config: { presence: { key: myPlayerId } } });
+  lobbyChannel.on("presence", {event:"sync"}, renderOnlineUsers);
+  lobbyChannel.subscribe((status)=>{
+    if(status==="SUBSCRIBED" && lobbyChannel){
+      lobbyChannel.track({ name: playerName, level: accountLevelFromXp(accountStats.total_points) });
+    }
+  });
+}
+function leaveLobbyPresence(){
+  if(lobbyChannel){ try{ sb.removeChannel(lobbyChannel); }catch(e){} lobbyChannel = null; }
+  const box = document.getElementById("onlineUsersList");
+  if(box) box.innerHTML = '<div class="lb-empty">Memuat…</div>';
+}
+function renderOnlineUsers(){
+  const box = document.getElementById("onlineUsersList");
+  if(!box || !lobbyChannel) return;
+  const state = lobbyChannel.presenceState();
+  const list = Object.entries(state).map(([key, arr])=>({ ...(arr && arr[0] || {}), key })).filter(u=>u.name);
+  list.sort((a,b)=>(b.level||1)-(a.level||1));
+  if(list.length===0){ box.innerHTML = '<div class="lb-empty">Belum ada yang online.</div>'; return; }
+  box.innerHTML = list.map(u=>
+    `<div class="lb-row"><span>🟢</span><span style="flex:1">${escapeHtml(u.name)}${u.key===myPlayerId?' <span style="color:var(--text-dim)">(Kamu)</span>':''}</span><span>Lv${u.level||1}</span></div>`
+  ).join("");
+}
+
 /* ================= SCREEN NAVIGATION ================= */
 function hideAllScreensNav(){
   document.querySelectorAll(".app-screen").forEach(el=>el.classList.add("hidden"));
@@ -2946,6 +3089,8 @@ function enterProfile(){
   document.getElementById("playModal").classList.add("hidden");
   loadMatchHistory();
   loadLeaderboard();
+  loadAccountProgress();
+  joinLobbyPresence();
 }
 
 /* ================= AUTH (login / signup / guest) ================= */
@@ -3052,6 +3197,7 @@ document.getElementById("btnLogout").addEventListener("click", async ()=>{
   if(sb && authUser){ try{ await sb.auth.signOut(); }catch(e){} }
   authUser = null; isGuest = false;
   myPlayerId = getPersistentPlayerId();
+  leaveLobbyPresence();
   document.getElementById("authEmail").value = ""; document.getElementById("authPassword").value = "";
   showScreen("authScreen");
 });
