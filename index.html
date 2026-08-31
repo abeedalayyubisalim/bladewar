@@ -119,20 +119,16 @@
   }
 
   #skillbar{
-    position:absolute; right:18px; bottom:18px; display:flex; gap:12px; z-index:6;
+    position:absolute; right:18px; bottom:18px; display:flex; gap:12px; z-index:6; pointer-events:none;
   }
   .skillslot{
     position:relative; width:58px; height:58px; border-radius:16px;
     background: rgba(15,17,28,0.75); border:2px solid #333955;
     display:flex; align-items:center; justify-content:center;
-    font-size:26px; cursor:pointer; user-select:none; -webkit-user-select:none;
-    touch-action:manipulation;
+    font-size:26px; user-select:none; -webkit-user-select:none;
   }
   .skillslot.ready{ border-color: rgba(255,255,255,0.5); }
-  .skillslot.empty{ opacity:0.45; font-size:20px; color:var(--text-dim); cursor:default; }
-  .skill-key{
-    position:absolute; top:2px; left:5px; font-size:10px; font-weight:700; color: var(--text-dim);
-  }
+  .skillslot.empty{ opacity:0.45; font-size:20px; color:var(--text-dim); }
   .skill-cd{
     position:absolute; inset:0; border-radius:14px; background: rgba(0,0,0,0.65);
     display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:800;
@@ -242,9 +238,9 @@
 </div>
 
 <div id="skillbar" class="hidden">
-  <div class="skillslot" data-slot="0"><span class="skill-icon">?</span><span class="skill-key">Z</span><div class="skill-cd"></div></div>
-  <div class="skillslot" data-slot="1"><span class="skill-icon">?</span><span class="skill-key">X</span><div class="skill-cd"></div></div>
-  <div class="skillslot" data-slot="2"><span class="skill-icon">?</span><span class="skill-key">C</span><div class="skill-cd"></div></div>
+  <div class="skillslot" data-slot="0"><span class="skill-icon">?</span><div class="skill-cd"></div></div>
+  <div class="skillslot" data-slot="1"><span class="skill-icon">?</span><div class="skill-cd"></div></div>
+  <div class="skillslot" data-slot="2"><span class="skill-icon">?</span><div class="skill-cd"></div></div>
 </div>
 
 <div id="connstatus" class="hidden"><span class="dot" id="connDot"></span><span id="connText">offline</span></div>
@@ -269,7 +265,7 @@
       <div><span id="resLevel">1</span><span>Level</span></div>
       <div><span id="resKills">0</span><span>Kills</span></div>
     </div>
-    <button class="btn btn-survival" id="btnSubmitScore">Kirim Skor</button>
+    <div class="sub" id="scoreStatus" style="min-height:16px;"></div>
     <button class="btn btn-secondary" id="btnBackMenu">Kembali ke Menu</button>
   </div>
 </div>
@@ -314,17 +310,17 @@ const MAX_SKILL_SLOTS = 3;
 
 const SKILLS = [
   { key:"electric", label:"Petir",  icon:"⚡", color:"#4dd8ff",
-    desc:"Menyambar hingga 4 musuh terdekat di sekitarmu dengan damage instan.",
-    cooldown: 6000, baseDmg: 16, range: 560, maxTargets: 4 },
+    desc:"Otomatis nyamber hingga 4 musuh terdekat di sekitarmu setiap 7 detik.",
+    cooldown: 7000, baseDmg: 16, range: 560, maxTargets: 4 },
   { key:"blood", label:"Darah", icon:"🩸", color:"#ff4d6d",
-    desc:"Ledakan darah di sekitarmu — menghantam semua musuh dekat dan menyembuhkan HP-mu sebesar setengah damage yang dihasilkan.",
-    cooldown: 8000, baseDmg: 9, radius: 150, lifestealPct: 0.5 },
+    desc:"Otomatis meledak setiap 10 detik — menghantam semua musuh dekat dan menyembuhkan HP-mu sebesar setengah damage yang dihasilkan.",
+    cooldown: 10000, baseDmg: 9, radius: 150, lifestealPct: 0.5 },
   { key:"poison", label:"Racun", icon:"☠", color:"#7bd93a",
-    desc:"Menciptakan awan racun di bawah kakimu. Musuh yang berdiri di dalamnya kena damage terus-menerus selama beberapa detik.",
+    desc:"Otomatis nyiptain awan racun di bawah kakimu setiap 9 detik. Musuh yang berdiri di dalamnya kena damage terus-menerus.",
     cooldown: 9000, tickDmg: 4, duration: 4000, radius: 115, tickEvery: 500 },
   { key:"heal", label:"Heal", icon:"✚", color:"#51cf66",
-    desc:"Langsung memulihkan sebagian besar HP-mu. Skill penyelamat di saat kritis.",
-    cooldown: 15000, healPct: 0.35 },
+    desc:"Otomatis mulihin sebagian besar HP-mu setiap 12 detik. Sustain pasif buat bertahan lebih lama.",
+    cooldown: 12000, healPct: 0.35 },
 ];
 function skillByKey(key){ return SKILLS.find(s=>s.key===key); }
 function skillLevelMult(level){ return 1 + (level-1)*0.25; } // +25% effect per level (max lvl 5 => +100%)
@@ -416,12 +412,7 @@ window.addEventListener("resize", resize); resize();
 
 /* ================= INPUT ================= */
 const keys = {};
-const SKILL_KEYS = { "z":0, "x":1, "c":2 };
-window.addEventListener("keydown", e=>{
-  const k = e.key.toLowerCase();
-  keys[k]=true;
-  if(k in SKILL_KEYS) activateSkillSlot(SKILL_KEYS[k]);
-});
+window.addEventListener("keydown", e=>{ keys[e.key.toLowerCase()]=true; });
 window.addEventListener("keyup", e=>{ keys[e.key.toLowerCase()]=false; });
 
 const joy = { active:false, dx:0, dy:0, id:null };
@@ -457,13 +448,6 @@ joyZone.addEventListener("touchmove", e=>{
 joyZone.addEventListener("touchend", e=>{
   for(const t of e.changedTouches){ if(t.identifier===joy.id) joyEnd(); }
 }, {passive:false});
-
-document.querySelectorAll(".skillslot").forEach(el=>{
-  const idx = parseInt(el.dataset.slot, 10);
-  const fire = (e)=>{ e.preventDefault(); activateSkillSlot(idx); };
-  el.addEventListener("click", fire);
-  el.addEventListener("touchstart", fire, {passive:false});
-});
 
 /* ================= GAME STATE ================= */
 let mode = null; // "survival" | "multiplayer"
@@ -634,7 +618,8 @@ function runSkillEffect(def, slot, p){
   }
 }
 
-function activateSkillSlot(idx){
+// Skills are passive: each equipped skill fires itself on its own cooldown, no input needed.
+function fireSkillSlot(idx){
   if(!running || !player || player.dead) return;
   const slot = player.skills[idx];
   if(!slot) return;
@@ -645,6 +630,12 @@ function activateSkillSlot(idx){
   runSkillEffect(def, slot, player);
   const cdReduction = Math.min(0.3, (slot.level-1)*0.08);
   slot.cooldownUntil = now + def.cooldown*(1-cdReduction);
+}
+function updatePassiveSkills(){
+  if(!player) return;
+  for(let i=0;i<player.skills.length;i++){
+    if(player.skills[i]) fireSkillSlot(i);
+  }
 }
 
 function updateSkillEffects(dt){
@@ -1038,6 +1029,7 @@ function loop(t){
   }
   updatePickups();
   updateSkillPickups();
+  updatePassiveSkills();
   updateSkillEffects(dt);
   updateFloaters(dt);
 
@@ -1377,7 +1369,7 @@ function onPlayerDeath(){
   document.getElementById("resTime").textContent = fmtTime(elapsed);
   document.getElementById("resLevel").textContent = player.level;
   document.getElementById("resKills").textContent = kills;
-  document.getElementById("btnSubmitScore").classList.toggle("hidden", mode!=="survival");
+  document.getElementById("scoreStatus").textContent = "";
   document.getElementById("results").classList.remove("hidden");
   document.getElementById("hud").classList.add("hidden");
   document.getElementById("skillbar").classList.add("hidden");
@@ -1400,7 +1392,7 @@ function renderGallery(tab){
       </div>`).join("");
   } else {
     body.innerHTML = `<div style="font-size:12px; color:var(--text-dim); margin-bottom:10px;">
-      Kamu punya 3 slot skill. Skill cuma didapat dari orb yang muncul di field (dan cuma berlaku selama game berjalan). Nemu skill yang sama lagi = level naik & efeknya makin kuat. Aktifin lewat tombol di layar (mobile) atau tombol <b>Z / X / C</b> (PC).
+      Kamu punya 3 slot skill. Skill cuma didapat dari orb yang muncul di field (dan cuma berlaku selama game berjalan). Skill bersifat <b>pasif</b> — begitu didapat, otomatis aktif sendiri sesuai cooldown-nya, nggak perlu ditekan. Nemu skill yang sama lagi = level naik & efeknya makin kuat. Icon di kanan bawah cuma nunjukin skill apa yang kamu punya & sisa cooldown-nya.
     </div>` + SKILLS.map(s=>`
       <div class="gitem" style="border-left-color:${s.color}">
         <div class="gitem-icon" style="color:${s.color}">${s.icon}</div>
@@ -1437,9 +1429,9 @@ document.getElementById("btnBackMenu").addEventListener("click", ()=>{
 });
 
 async function submitScore(){
-  const btn = document.getElementById("btnSubmitScore");
-  if(!sb){ if(btn) btn.textContent = "Gagal (no supabase)"; return; }
-  if(btn){ btn.disabled = true; btn.textContent = "Mengirim…"; }
+  const statusEl = document.getElementById("scoreStatus");
+  if(!sb){ if(statusEl) statusEl.textContent = ""; return; }
+  if(statusEl){ statusEl.textContent = "Mengirim skor…"; }
   try{
     // pakai RPC: hanya menimpa skor lama (player_id sama) kalau progress baru lebih tinggi
     const { error } = await sb.rpc("submit_bladewar_score", {
@@ -1450,14 +1442,13 @@ async function submitScore(){
       p_kills: kills,
     });
     if(error) throw error;
-    if(btn){ btn.disabled = false; btn.textContent = "Terkirim ✓"; }
+    if(statusEl){ statusEl.textContent = "Skor terkirim ✓"; }
     loadLeaderboard();
   }catch(e){
     console.warn("submit score failed", e);
-    if(btn){ btn.disabled = false; btn.textContent = "Kirim Ulang"; }
+    if(statusEl){ statusEl.textContent = ""; }
   }
 }
-document.getElementById("btnSubmitScore").addEventListener("click", submitScore);
 
 /* ================= LEADERBOARD ================= */
 async function loadLeaderboard(){
