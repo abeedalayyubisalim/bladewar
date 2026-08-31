@@ -2768,9 +2768,8 @@ function onPlayerDeath(){
   document.getElementById("hud").classList.add("hidden");
   document.getElementById("skillbar").classList.add("hidden");
   document.getElementById("exitBtn").classList.add("hidden");
-  logMatchHistory();
   if(mode==="survival") submitScore(); // auto-kirim skor, progress tertinggi per player_id yang kesimpen
-  bumpAccountProgress();
+  bumpAccountProgress(); // ini juga yang nyatet ke match_history_bladewar sekarang — lihat definisinya
 }
 
 /* ================= EXIT / PAUSE ================= */
@@ -2819,8 +2818,7 @@ document.getElementById("btnEndRoom").addEventListener("click", async (e)=>{
       roomEnded = true;
       if(channel) channel.send({type:"broadcast", event:"roomEnded", payload:{ room: roomCode }});
       await submitScore(); // fold this room's result into the survival leaderboard too
-      await logMatchHistory();
-      await bumpAccountProgress();
+      await bumpAccountProgress(); // ini juga yang nyatet ke match_history_bladewar sekarang
       document.getElementById("exitModal").classList.add("hidden");
       showRoomSummary(roomCode, "Kamu mengakhiri room ini.");
     }
@@ -3030,25 +3028,41 @@ async function loadMatchHistory(){
 
 /* ================= ACCOUNT PROGRESS: level akun, XP, achievement/badge (profile screen) =================
    Ini TERPISAH dari "player.level" di dalam satu pertandingan (yang reset tiap main dari orb EXP di
-   lapangan). Level akun ini permanen per player_id: tiap pertandingan selesai, poin pertandingan itu
-   (formula sama kayak computePoints) ditambahkan ke total_points lewat RPC, dan level akun dihitung
-   dari total_points itu. Achievement/badge juga dihitung dari statistik kumulatif yang sama. */
-const ACCOUNT_XP_PER_LEVEL = 300;
-function accountLevelFromXp(xp){ return Math.floor(Math.max(0,xp||0) / ACCOUNT_XP_PER_LEVEL) + 1; }
-function accountXpIntoLevel(xp){ return Math.max(0,xp||0) % ACCOUNT_XP_PER_LEVEL; }
+   lapangan). Level akun permanen per player_id, dihitung dari TOTAL POIN SEMUA PERTANDINGAN yang
+   tercatat di tabel match_history_bladewar (bukan dari counter terpisah) — 1 XP = 1000 poin mentah.
+   Biar ini akurat, bumpAccountProgress() di bawah SELALU nyatet ke match_history_bladewar dulu
+   (lewat logMatchHistory) sebelum ngitung ulang XP-nya.
+   Kebutuhan XP tiap level berjenjang & membesar: Level 1 = 300 XP, Level 2 = 500 XP, dan mulai
+   Level 3 tiap level naik jadi 2x lipat kebutuhan level sebelumnya (1000, 2000, 4000, dst). */
+const RAW_POINTS_PER_XP = 1000;
+function levelCost(level){
+  if(level<=1) return 300;
+  if(level===2) return 500;
+  return 500 * Math.pow(2, level-2);
+}
+function accountLevelInfo(xp){
+  let level = 1, remaining = Math.max(0, xp||0), cost = levelCost(1);
+  while(remaining >= cost){
+    remaining -= cost;
+    level++;
+    cost = levelCost(level);
+  }
+  return { level, into: remaining, cost };
+}
+function accountLevelFromXp(xp){ return accountLevelInfo(xp).level; }
+function accountXpFromStats(s){ return (s.raw_points||0) / RAW_POINTS_PER_XP; }
 
-const DEFAULT_ACCOUNT_STATS = { total_points:0, total_matches:0, total_kills:0, total_boss_kills:0, best_time_survived:0, best_level:1, best_kills:0, best_boss_kills:0 };
+const DEFAULT_ACCOUNT_STATS = { total_matches:0, total_kills:0, total_boss_kills:0, best_time_survived:0, best_level:1, best_kills:0, best_boss_kills:0, raw_points:0 };
 let accountStats = { ...DEFAULT_ACCOUNT_STATS };
 
 // Achievement yang cuma "kebuka / belum" sekali, nggak bertingkat.
 const SIMPLE_ACHIEVEMENTS = [
   { key:"first_blood", icon:"🩸", name:"Darah Pertama", desc:"Dapatkan kill pertamamu.", check: s => s.total_kills >= 1 },
-  { key:"account_10", icon:"🥇", name:"Naik Pangkat", desc:"Capai Level Akun 10.", check: s => accountLevelFromXp(s.total_points) >= 10 },
 ];
 
 // Achievement BERTINGKAT (5 level tiap kategori) — klik badge-nya buat lihat rincian tiap levelnya.
 // Semua "best_*" itu rekor DALAM SATU PERTANDINGAN (bukan akumulasi semua pertandingan), kecuali
-// match_count yang memang total keseluruhan pertandingan yang pernah dimainkan.
+// match_count (total semua pertandingan) dan account_level (dari Level Akun keseluruhan).
 const TIERED_ACHIEVEMENTS = [
   { key:"kills_match", icon:"⚔️", name:"Pembantai", desc:"Kill terbanyak dalam SATU pertandingan.",
     statKey:"best_kills", unit:"kill", tiers:[100,500,1000,5000,10000] },
@@ -3062,12 +3076,17 @@ const TIERED_ACHIEVEMENTS = [
     statKey:"total_matches", unit:"match", tiers:[25,75,200,500,1000] },
   { key:"wave_match", icon:"🌊", name:"Gelombang", desc:"Gelombang tertinggi yang pernah kamu capai dalam SATU pertandingan.",
     statKey:"best_wave", unit:"wave", tiers:[5,15,30,45,60] }, // best_wave dihitung dari best_time_survived, lihat di bawah
+  { key:"account_rank", icon:"🎖️", name:"Pangkat Akun", desc:"Capai Level Akun tertentu buat naik pangkat.",
+    statKey:"account_level", unit:"level", tiers:[10,25,50,75,100],
+    tierNames:["Bronze","Silver","Gold","Diamond","Ultimate Diamond"],
+    tierIcons:["🥉","🥈","🥇","💎","👑"] },
 ];
 
-// "wave" itu murni turunan dari waktu (lihat currentWave()/WAVE_INTERVAL) — jadi gelombang tertinggi
-// yang pernah dicapai = dihitung dari rekor waktu bertahan terlama, nggak perlu kolom DB terpisah.
+// "wave" itu murni turunan dari waktu (lihat currentWave()/WAVE_INTERVAL), dan "account_level" dari
+// Level Akun (di atas) — keduanya turunan, nggak perlu kolom DB terpisah.
 function tieredAchievementValue(a, s){
   if(a.statKey==="best_wave") return Math.floor((s.best_time_survived||0)/WAVE_INTERVAL)+1;
+  if(a.statKey==="account_level") return accountLevelFromXp(accountXpFromStats(s));
   return s[a.statKey]||0;
 }
 function tieredAchievementTier(a, s){
@@ -3080,14 +3099,13 @@ function fmtAchThreshold(a, val){ return a.isTime? Math.round(val/60)+" menit" :
 function fmtAchCurrentValue(a, val){ return a.isTime? Math.floor(val/60)+" menit" : Math.floor(val)+" "+a.unit; }
 
 function renderAccountProgress(){
-  const lvl = accountLevelFromXp(accountStats.total_points);
-  const into = accountXpIntoLevel(accountStats.total_points);
+  const info = accountLevelInfo(accountXpFromStats(accountStats));
   const lvlEl = document.getElementById("profileLevelLabel");
   const xpEl = document.getElementById("profileXpLabel");
   const fillEl = document.getElementById("profileXpFill");
-  if(lvlEl) lvlEl.textContent = "Level Akun "+lvl;
-  if(xpEl) xpEl.textContent = into+" / "+ACCOUNT_XP_PER_LEVEL+" XP";
-  if(fillEl) fillEl.style.width = Math.round((into/ACCOUNT_XP_PER_LEVEL)*100)+"%";
+  if(lvlEl) lvlEl.textContent = "Level Akun "+info.level;
+  if(xpEl) xpEl.textContent = Math.floor(info.into)+" / "+info.cost+" XP";
+  if(fillEl) fillEl.style.width = Math.round((info.into/info.cost)*100)+"%";
   const grid = document.getElementById("badgeGrid");
   if(!grid) return;
   const items = [
@@ -3098,8 +3116,12 @@ function renderAccountProgress(){
     }),
   ];
   grid.innerHTML = items.map((it,i)=>{
-    const tierTag = (it.kind==="tiered" && it.tier>0) ? `<span class="badge-tier">${it.tier}</span>` : "";
-    return `<div class="badge ${it.unlocked?"unlocked":"locked"}" data-ach-idx="${i}" title="${escapeHtml(it.def.name)}">${it.def.icon}${tierTag}</div>`;
+    let icon = it.def.icon, tierTag = "";
+    if(it.kind==="tiered" && it.tier>0){
+      if(it.def.tierIcons) icon = it.def.tierIcons[it.tier-1];
+      else tierTag = `<span class="badge-tier">${it.tier}</span>`;
+    }
+    return `<div class="badge ${it.unlocked?"unlocked":"locked"}" data-ach-idx="${i}" title="${escapeHtml(it.def.name)}">${icon}${tierTag}</div>`;
   }).join("");
   grid.querySelectorAll(".badge").forEach((el,i)=>{
     el.addEventListener("click", ()=>showAchievementModal(items[i]));
@@ -3108,7 +3130,8 @@ function renderAccountProgress(){
 
 function showAchievementModal(item){
   const a = item.def;
-  document.getElementById("achModalIcon").textContent = a.icon;
+  const icon = (item.kind==="tiered" && a.tierIcons && item.tier>0) ? a.tierIcons[item.tier-1] : a.icon;
+  document.getElementById("achModalIcon").textContent = icon;
   document.getElementById("achModalName").textContent = a.name;
   document.getElementById("achModalDesc").textContent = a.desc;
   const box = document.getElementById("achModalTiers");
@@ -3118,7 +3141,8 @@ function showAchievementModal(item){
     const val = tieredAchievementValue(a, accountStats);
     box.innerHTML = a.tiers.map((t,i)=>{
       const done = val >= t;
-      return `<div class="ach-tier-row ${done?"done":""}"><span>Level ${i+1}</span><span>${done?"✓ ":""}${fmtAchThreshold(a,t)}</span></div>`;
+      const label = a.tierNames ? (a.tierIcons[i]+" "+a.tierNames[i]) : ("Level "+(i+1));
+      return `<div class="ach-tier-row ${done?"done":""}"><span>${label}</span><span>${done?"✓ ":""}${fmtAchThreshold(a,t)}</span></div>`;
     }).join("") + `<div style="font-size:11px;color:var(--text-dim);margin-top:8px;">Rekor kamu sekarang: ${fmtAchCurrentValue(a,val)}</div>`;
   }
   document.getElementById("achievementModal").classList.remove("hidden");
@@ -3130,37 +3154,46 @@ document.getElementById("btnCloseAchModal").addEventListener("click", ()=>{
 async function loadAccountProgress(){
   if(!sb){ renderAccountProgress(); return; }
   try{
-    const { data, error } = await sb.from("player_stats_bladewar")
-      .select("total_points,total_matches,total_kills,total_boss_kills,best_time_survived,best_level,best_kills,best_boss_kills")
-      .eq("player_id", myPlayerId)
-      .maybeSingle();
-    if(error) throw error;
-    accountStats = data || { ...DEFAULT_ACCOUNT_STATS };
+    const [statsRes, xpRes] = await Promise.all([
+      sb.from("player_stats_bladewar")
+        .select("total_matches,total_kills,total_boss_kills,best_time_survived,best_level,best_kills,best_boss_kills")
+        .eq("player_id", myPlayerId)
+        .maybeSingle(),
+      // Level Akun dihitung dari total poin SEMUA pertandingan di match_history_bladewar, bukan dari
+      // counter terpisah — jadi selalu konsisten sama riwayat main yang ditampilkan di profil.
+      sb.rpc("player_total_points_bladewar", { p_player_id: myPlayerId }),
+    ]);
+    if(statsRes.error) throw statsRes.error;
+    accountStats = { ...DEFAULT_ACCOUNT_STATS, ...(statsRes.data||{}), raw_points: (!xpRes.error && xpRes.data) || 0 };
   }catch(e){
     console.warn("account progress load failed (jalanin bladewar_setup_v2.sql kalau tabel belum ada)", e);
     accountStats = { ...DEFAULT_ACCOUNT_STATS };
   }
   renderAccountProgress();
-  if(lobbyChannel) lobbyChannel.track({ name: playerName, level: accountLevelFromXp(accountStats.total_points) });
+  if(lobbyChannel) lobbyChannel.track({ name: playerName, level: accountLevelFromXp(accountXpFromStats(accountStats)) });
 }
 
-// Dipanggil sekali tiap satu pertandingan berakhir (mati, keluar sambil nyimpen, atau akhiri room),
-// bareng-bareng sama submitScore()/logMatchHistory() — progressBumpedThisMatch mencegah kehitung dobel
-// kalau beberapa jalur keluar itu somehow kepanggil bareng buat pertandingan yang sama.
+// Dipanggil sekali tiap satu pertandingan berakhir (mati, keluar sambil nyimpen, atau akhiri room).
+// progressBumpedThisMatch mencegah kehitung dobel kalau beberapa jalur keluar itu somehow kepanggil
+// bareng buat pertandingan yang sama. Ini JUGA yang mencatat ke match_history_bladewar (logMatchHistory)
+// — sengaja disatuin di sini biar poin pertandingan itu SELALU tercatat bareng progress akunnya,
+// nggak ada jalur keluar yang kelewat nyatet (soalnya Level Akun dihitung dari tabel riwayat itu).
 async function bumpAccountProgress(){
   if(progressBumpedThisMatch || !sb || !player) return;
   progressBumpedThisMatch = true;
+  const matchPoints = computePoints(player.level, kills, Math.floor(elapsed));
   try{
+    await logMatchHistory();
     const { data, error } = await sb.rpc("bump_player_stats_bladewar", {
       p_player_id: myPlayerId, p_name: playerName,
-      p_dpoints: computePoints(player.level, kills, Math.floor(elapsed)),
+      p_dpoints: matchPoints, // masih kesimpen di player_stats_bladewar buat riwayat, tapi Level Akun sekarang dihitung dari match_history_bladewar (di atas)
       p_dmatches: 1, p_dkills: kills, p_dboss_kills: bossKills,
       p_time_survived: Math.floor(elapsed), p_level: player.level,
     });
     if(error) throw error;
-    if(data) accountStats = data;
+    if(data) accountStats = { ...accountStats, ...data, raw_points: (accountStats.raw_points||0) + matchPoints };
     renderAccountProgress();
-    if(lobbyChannel) lobbyChannel.track({ name: playerName, level: accountLevelFromXp(accountStats.total_points) });
+    if(lobbyChannel) lobbyChannel.track({ name: playerName, level: accountLevelFromXp(accountXpFromStats(accountStats)) });
   }catch(e){ console.warn("bump account progress failed", e); }
 }
 
@@ -3176,7 +3209,7 @@ function joinLobbyPresence(){
   lobbyChannel.on("presence", {event:"sync"}, renderOnlineUsers);
   lobbyChannel.subscribe((status)=>{
     if(status==="SUBSCRIBED" && lobbyChannel){
-      lobbyChannel.track({ name: playerName, level: accountLevelFromXp(accountStats.total_points) });
+      lobbyChannel.track({ name: playerName, level: accountLevelFromXp(accountXpFromStats(accountStats)) });
     }
   });
 }
