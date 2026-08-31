@@ -1,199 +1,979 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Titan Sword War</title>
-    <!-- Supabase CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <style>
-        body {
-            background: #0f172a;
-            color: white;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            text-align: center;
-            margin: 0;
-            padding: 10px;
-        }
-        canvas {
-            background: #1e293b;
-            border: 4px solid #334155;
-            border-radius: 12px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
-            cursor: crosshair;
-            max-width: 100%;
-        }
-        .ui-container {
-            margin-top: 10px;
-        }
-        button, input {
-            padding: 10px 15px;
-            margin: 5px;
-            border-radius: 6px;
-            border: none;
-            font-size: 14px;
-        }
-        button {
-            background: #f43f5e;
-            color: white;
-            font-weight: bold;
-            cursor: pointer;
-        }
-        button:hover { background: #e11d48; }
-        input { background: #334155; color: white; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Bladewar</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+  :root{
+    color-scheme: dark;
+    --bg: #0b0d14;
+    --panel: #151826;
+    --panel-2: #1d2137;
+    --accent: #ff5b5b;
+    --accent-2: #4dabf7;
+    --text: #e9ecf5;
+    --text-dim: #8b90a8;
+    --common: #c7ccd8;
+    --rare: #4dabf7;
+    --epic: #b563ff;
+    --legendary: #ffa94d;
+  }
+  *{ box-sizing: border-box; }
+  html,body{
+    margin:0; padding:0; width:100%; height:100%;
+    background: var(--bg); color: var(--text);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    overflow: hidden; overscroll-behavior: none;
+  }
+  #game{ position:absolute; inset:0; display:block; touch-action:none; background: var(--bg); }
+
+  .hidden{ display:none !important; }
+
+  /* ---------- Menu ---------- */
+  #menu{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    background: radial-gradient(ellipse at center, #1a1f33 0%, #05060a 100%);
+    z-index: 10;
+  }
+  .menu-card{
+    background: rgba(21,24,38,0.9); border: 1px solid #2b3050; border-radius: 16px;
+    padding: 32px 36px; width: min(420px, 92vw); backdrop-filter: blur(6px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+  .title{
+    font-size: 40px; font-weight: 800; text-align:center; letter-spacing: 2px;
+    background: linear-gradient(135deg, #ff5b5b, #ffa94d);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    margin: 0 0 4px 0;
+  }
+  .subtitle{ text-align:center; color: var(--text-dim); font-size: 13px; margin-bottom: 22px; }
+  label{ font-size: 12px; color: var(--text-dim); display:block; margin: 14px 0 6px; }
+  input[type=text]{
+    width:100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #333955;
+    background: #0f111c; color: var(--text); font-size: 14px; outline: none;
+  }
+  input[type=text]:focus{ border-color: var(--accent-2); }
+  .btn{
+    width:100%; padding: 12px 14px; border-radius: 10px; border: none; cursor:pointer;
+    font-size: 15px; font-weight: 700; margin-top: 12px; transition: transform .1s, filter .15s;
+    color: #0b0d14;
+  }
+  .btn:active{ transform: scale(0.98); }
+  .btn-survival{ background: linear-gradient(135deg, #6bffb0, #26d07c); }
+  .btn-mp{ background: linear-gradient(135deg, #7db8ff, #4d7dff); }
+  .btn-secondary{ background: #262b45; color: var(--text); }
+  .btn:hover{ filter: brightness(1.08); }
+  .row{ display:flex; gap:10px; }
+  .row > *{ flex:1; }
+
+  #leaderboard{ margin-top: 20px; border-top: 1px solid #262b45; padding-top: 14px; }
+  #leaderboard h3{ margin: 0 0 8px; font-size: 13px; color: var(--text-dim); font-weight:600; letter-spacing:.5px; text-transform:uppercase;}
+  .lb-row{ display:flex; justify-content:space-between; font-size: 13px; padding: 4px 0; color: var(--text); }
+  .lb-row span:first-child{ color: var(--text-dim); width: 24px; display:inline-block;}
+  .lb-empty{ font-size:12px; color:var(--text-dim); }
+
+  /* ---------- HUD ---------- */
+  #hud{ position:absolute; inset:0; pointer-events:none; z-index:5; }
+  #topbar{
+    position:absolute; top:14px; left:14px; right:14px; display:flex; justify-content:space-between; align-items:flex-start;
+  }
+  #statpanel{
+    background: rgba(15,17,28,0.7); border:1px solid #2b3050; border-radius:12px; padding:10px 14px; min-width:220px;
+  }
+  #hpbar-outer, #expbar-outer{
+    width:100%; height:10px; border-radius:6px; background:#20233a; overflow:hidden; margin-top:4px;
+  }
+  #hpbar{ height:100%; background: linear-gradient(90deg,#ff5b5b,#ff9b5b); width:100%; }
+  #expbar{ height:100%; background: linear-gradient(90deg,#4dabf7,#63e6ff); width:0%; }
+  .stat-line{ display:flex; justify-content:space-between; font-size:12px; color:var(--text-dim); margin-top:8px; }
+  .stat-line b{ color: var(--text); font-weight:700; }
+
+  #timerbox{
+    background: rgba(15,17,28,0.7); border:1px solid #2b3050; border-radius:12px; padding:10px 16px; text-align:center; font-size:20px; font-weight:800;
+  }
+  #timerbox small{ display:block; font-size:10px; color:var(--text-dim); font-weight:500; }
+
+  #roster{
+    width:170px; background: rgba(15,17,28,0.7); border:1px solid #2b3050; border-radius:12px; padding:10px 12px;
+    max-height: 220px; overflow:hidden; flex-shrink:0;
+  }
+  #roster h4{ margin:0 0 6px; font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.5px;}
+  .roster-row{ font-size:12px; display:flex; justify-content:space-between; padding:2px 0; }
+
+  #banner{
+    position:absolute; top:80px; left:50%; transform:translateX(-50%);
+    font-size: 22px; font-weight:800; color:#ffd43b; text-shadow: 0 2px 10px rgba(0,0,0,.6);
+    opacity:0; transition: opacity .3s, transform .3s; pointer-events:none;
+  }
+
+  #joystick-zone{ position:absolute; left:0; bottom:0; width:45%; height:45%; z-index:6; }
+  #joystick-base{
+    position:absolute; width:110px; height:110px; border-radius:50%; background: rgba(255,255,255,0.07);
+    border: 2px solid rgba(255,255,255,0.15); display:none;
+  }
+  #joystick-stick{
+    position:absolute; width:50px; height:50px; border-radius:50%; background: rgba(255,255,255,0.25);
+    border: 2px solid rgba(255,255,255,0.4);
+  }
+
+  /* ---------- Results ---------- */
+  #results{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background: rgba(5,6,10,0.85); z-index:20;
+  }
+  .result-card{ background: var(--panel); border:1px solid #2b3050; border-radius:16px; padding:30px 34px; width:min(380px,90vw); text-align:center;}
+  .result-card h2{ margin:0 0 4px; font-size:26px; }
+  .result-card .sub{ color:var(--text-dim); font-size:13px; margin-bottom:18px;}
+  .result-stats{ display:flex; justify-content:space-around; margin: 18px 0; }
+  .result-stats div{ font-size:22px; font-weight:800; }
+  .result-stats span{ display:block; font-size:11px; color:var(--text-dim); font-weight:500; margin-top:2px;}
+
+  #connstatus{
+    position:absolute; bottom:14px; left:14px; font-size:11px; color: var(--text-dim);
+    background: rgba(15,17,28,0.6); padding:5px 10px; border-radius:8px; border:1px solid #2b3050;
+  }
+  .dot{ display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:5px; background:#666; }
+  .dot.ok{ background:#51cf66; }
+  .dot.bad{ background:#ff5b5b; }
+</style>
 </head>
 <body>
 
-    <h2>⚔️ Titan Sword War: Battle Arena</h2>
+<canvas id="game"></canvas>
 
-    <!-- Login Sederhana untuk Supabase -->
-    <div id="login-screen">
-        <input type="text" id="username" placeholder="Nama Kesatria...">
-        <button onclick="startGameSession()">Masuk Arena</button>
+<div id="menu">
+  <div class="menu-card">
+    <div class="title">BLADEWAR</div>
+    <div class="subtitle">Kumpulin pedang, spin, bantai musuh.</div>
+
+    <label for="nameInput">Nama Kamu</label>
+    <input type="text" id="nameInput" maxlength="14" placeholder="Player">
+
+    <button class="btn btn-survival" id="btnSurvival">⚔ Survival (Single Player)</button>
+
+    <label for="roomInput" style="margin-top:18px;">Kode Room Multiplayer</label>
+    <div class="row">
+      <input type="text" id="roomInput" maxlength="16" placeholder="public" value="public">
     </div>
+    <button class="btn btn-mp" id="btnMulti">🌐 Masuk Multiplayer</button>
 
-    <!-- Area Game -->
-    <div id="game-screen" style="display: none;">
-        <div>Stage: <span id="stage-display">1</span> | Skor: <span id="score-display">0</span></div>
-        <canvas id="gameCanvas" width="400" height="500"></canvas>
-        <div class="ui-container">
-            <p><i>Klik pada canvas untuk melemparkan pedang ke musuh!</i></p>
-            <button onclick="saveProgress()" style="background: #10b981;">Simpan ke Supabase</button>
-        </div>
+    <div id="leaderboard">
+      <h3>Top Survival</h3>
+      <div id="lbList"><div class="lb-empty">Memuat…</div></div>
     </div>
+  </div>
+</div>
 
-    <script>
-        // Konfigurasi Supabase
-        const SUPABASE_URL = 'https://mlsibwihfzehqcdawrdh.supabase.co';
-        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1sc2lid2loZnplaHFjZGF3cmRoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgxMTcwNTEsImV4cCI6MjEwMzY5MzA1MX0.faKWNZqTLE6nEH6nPw0L4uFepTy6ZvqrZDy2BaHcWxs';
-        const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+<div id="hud" class="hidden">
+  <div id="topbar">
+    <div id="statpanel">
+      <div style="display:flex; justify-content:space-between; align-items:baseline;">
+        <b id="hudName" style="font-size:14px;">Player</b>
+        <span id="hudLevel" style="font-size:12px; color:var(--text-dim);">Lv 1</span>
+      </div>
+      <div id="hpbar-outer"><div id="hpbar"></div></div>
+      <div id="expbar-outer"><div id="expbar"></div></div>
+      <div class="stat-line"><span>Pedang</span><b id="hudSwords">0</b></div>
+      <div class="stat-line"><span>Kills</span><b id="hudKills">0</b></div>
+    </div>
+    <div id="timerbox"><span id="hudTimer">00:00</span><small id="hudMode">SURVIVAL</small></div>
+    <div id="roster" class="hidden">
+      <h4>Arena</h4>
+      <div id="rosterList"></div>
+    </div>
+  </div>
+  <div id="banner"></div>
+</div>
 
-        let playerName = '';
-        let score = 0;
-        let stage = 1;
+<div id="joystick-zone" class="hidden">
+  <div id="joystick-base"><div id="joystick-stick"></div></div>
+</div>
 
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
+<div id="connstatus" class="hidden"><span class="dot" id="connDot"></span><span id="connText">offline</span></div>
 
-        // Posisi target musuh & pedang pemain
-        let enemy = { x: 200, y: 100, radius: 30, speed: 2 };
-        let swords = [];
-        let playerThrowing = false;
+<div id="results" class="hidden">
+  <div class="result-card">
+    <h2 id="resTitle">Kamu Tumbang!</h2>
+    <div class="sub" id="resSub">Bertahan cukup lama juga.</div>
+    <div class="result-stats">
+      <div><span id="resTime">00:00</span><span>Waktu</span></div>
+      <div><span id="resLevel">1</span><span>Level</span></div>
+      <div><span id="resKills">0</span><span>Kills</span></div>
+    </div>
+    <button class="btn btn-survival" id="btnSubmitScore">Kirim Skor</button>
+    <button class="btn btn-secondary" id="btnBackMenu">Kembali ke Menu</button>
+  </div>
+</div>
 
-        function startGameSession() {
-            const inputVal = document.getElementById('username').value.trim();
-            if (!inputVal) {
-                alert('Masukkan nama kesatria dulu!');
-                return;
-            }
-            playerName = inputVal;
-            document.getElementById('login-screen').style.display = 'none';
-            document.getElementById('game-screen').style.display = 'block';
-            
-            // Muat data dari Supabase jika ada
-            fetchPlayerScore();
-            loop();
+<script>
+(function(){
+"use strict";
+
+/* ================= CONFIG ================= */
+const SUPABASE_URL = "https://mlsibwihfzehqcdawrdh.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1sc2lid2loZnplaHFjZGF3cmRoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgxMTcwNTEsImV4cCI6MjEwMzY5MzA1MX0.faKWNZqTLE6nEH6nPw0L4uFepTy6ZvqrZDy2BaHcWxs";
+let sb = null;
+try{
+  if (window.supabase && window.supabase.createClient){
+    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  }
+}catch(e){ console.warn("Supabase init failed", e); }
+
+const SWORD_TIERS = [
+  { key:"common",    label:"Common",    color:"#c7ccd8", dmg:3,  weight:55 },
+  { key:"rare",      label:"Rare",      color:"#4dabf7", dmg:6,  weight:30 },
+  { key:"epic",      label:"Epic",      color:"#b563ff", dmg:11, weight:12 },
+  { key:"legendary", label:"Legendary", color:"#ffa94d", dmg:20, weight:3  },
+];
+const MAX_SWORDS = 10;
+const HIT_COOLDOWN = 260; // ms, per sword-vs-target
+const PLAYER_IFRAME = 500; // ms invulnerability after hit
+const BASE_ORBIT_RADIUS = 46;
+const ORBIT_RADIUS_PER_SWORD = 3.2;
+const BASE_SPIN_SPEED = 2.6; // rad/s
+const SPIN_SPEED_PER_LEVEL = 0.045;
+const SWORD_VISUAL_LEN = 34;
+const BLADE_HALF_WIDTH = 11;
+
+function pickTier(){
+  const total = SWORD_TIERS.reduce((s,t)=>s+t.weight,0);
+  let r = Math.random()*total;
+  for(const t of SWORD_TIERS){ if(r < t.weight) return t; r -= t.weight; }
+  return SWORD_TIERS[0];
+}
+function expForLevel(lv){ return Math.round(6 + lv*4.5 + lv*lv*0.35); }
+function rand(a,b){ return a + Math.random()*(b-a); }
+function dist2(ax,ay,bx,by){ const dx=ax-bx, dy=ay-by; return dx*dx+dy*dy; }
+function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+function fmtTime(s){
+  s = Math.max(0, Math.floor(s));
+  const m = Math.floor(s/60), sec = s%60;
+  return String(m).padStart(2,"0")+":"+String(sec).padStart(2,"0");
+}
+function uid(){ return Math.random().toString(36).slice(2)+Date.now().toString(36); }
+function pointSegDist(px,py,x1,y1,x2,y2){
+  const dx=x2-x1, dy=y2-y1;
+  const lenSq = dx*dx+dy*dy;
+  let t = lenSq>0 ? ((px-x1)*dx+(py-y1)*dy)/lenSq : 0;
+  t = clamp(t,0,1);
+  const cx = x1+t*dx, cy = y1+t*dy;
+  return Math.hypot(px-cx, py-cy);
+}
+function colorForId(id){
+  let h=0; for(let i=0;i<id.length;i++) h = (h*31 + id.charCodeAt(i))>>>0;
+  return `hsl(${h%360} 70% 60%)`;
+}
+
+/* ================= CANVAS ================= */
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+function resize(){ canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+window.addEventListener("resize", resize); resize();
+
+/* ================= INPUT ================= */
+const keys = {};
+window.addEventListener("keydown", e=>{ keys[e.key.toLowerCase()]=true; });
+window.addEventListener("keyup", e=>{ keys[e.key.toLowerCase()]=false; });
+
+const joy = { active:false, dx:0, dy:0, id:null };
+const joyZone = document.getElementById("joystick-zone");
+const joyBase = document.getElementById("joystick-base");
+const joyStick = document.getElementById("joystick-stick");
+let isTouch = ("ontouchstart" in window) || navigator.maxTouchPoints > 0;
+if (isTouch){ joyZone.classList.remove("hidden"); }
+
+function joyStart(x,y,id){
+  joy.active = true; joy.id = id; joy.baseX = x; joy.baseY = y; joy.dx=0; joy.dy=0;
+  joyBase.style.display = "block";
+  joyBase.style.left = (x-55)+"px"; joyBase.style.top = (y-55)+"px";
+  joyStick.style.left = "30px"; joyStick.style.top = "30px";
+}
+function joyMove(x,y){
+  if(!joy.active) return;
+  let dx = x-joy.baseX, dy = y-joy.baseY;
+  const max = 55; const d = Math.hypot(dx,dy);
+  if(d>max){ dx = dx/d*max; dy = dy/d*max; }
+  joy.dx = dx/max; joy.dy = dy/max;
+  joyStick.style.left = (30+dx)+"px"; joyStick.style.top = (30+dy)+"px";
+}
+function joyEnd(){ joy.active=false; joy.dx=0; joy.dy=0; joyBase.style.display="none"; }
+
+joyZone.addEventListener("touchstart", e=>{
+  const t = e.changedTouches[0]; joyStart(t.clientX, t.clientY, t.identifier); e.preventDefault();
+}, {passive:false});
+joyZone.addEventListener("touchmove", e=>{
+  for(const t of e.changedTouches){ if(t.identifier===joy.id) joyMove(t.clientX,t.clientY); }
+  e.preventDefault();
+}, {passive:false});
+joyZone.addEventListener("touchend", e=>{
+  for(const t of e.changedTouches){ if(t.identifier===joy.id) joyEnd(); }
+}, {passive:false});
+
+/* ================= GAME STATE ================= */
+let mode = null; // "survival" | "multiplayer"
+let world = { w: 4000, h: 4000 };
+let running = false;
+let elapsed = 0;
+let kills = 0;
+let playerName = "Player";
+let myId = uid();
+let myColor = colorForId(myId);
+
+let player = null;
+let creeps = [];
+let pickups = [];
+let particles = [];
+let floaters = []; // floating damage/exp text
+
+let camera = { x:0, y:0 };
+
+// Multiplayer
+let channel = null;
+let roomCode = "public";
+let remotePlayers = new Map(); // id -> {x,y,name,color,level,hp,maxHp,swords,spinAngle,lastSeen}
+let lastBroadcast = 0;
+const BROADCAST_INTERVAL = 90; // ms
+
+function newPlayer(){
+  return {
+    x: world.w/2, y: world.h/2, vx:0, vy:0,
+    speed: 210,
+    hp: 100, maxHp: 100,
+    level: 1, exp: 0,
+    swords: [ { ...SWORD_TIERS[0] } ],
+    bonusDmgMult: 1,
+    spinAngle: 0,
+    facing: 0,
+    lastHitAt: -9999,
+    radius: 18,
+    dead: false,
+  };
+}
+
+function orbitRadius(p){ return BASE_ORBIT_RADIUS + (p.swords.length-1)*ORBIT_RADIUS_PER_SWORD; }
+function spinSpeed(p){ return BASE_SPIN_SPEED + p.level*SPIN_SPEED_PER_LEVEL; }
+
+function addSword(p, tier){
+  if(p.swords.length < MAX_SWORDS){
+    p.swords.push({ ...tier });
+  } else {
+    // replace weakest if new tier stronger, else small global buff
+    let weakestIdx = 0;
+    for(let i=1;i<p.swords.length;i++) if(p.swords[i].dmg < p.swords[weakestIdx].dmg) weakestIdx = i;
+    if(tier.dmg > p.swords[weakestIdx].dmg){
+      p.swords[weakestIdx] = { ...tier };
+    } else {
+      p.bonusDmgMult += 0.02;
+    }
+  }
+}
+
+function gainExp(p, amount, x, y){
+  p.exp += amount;
+  spawnFloater(x, y, "+"+amount+" exp", "#63e6ff");
+  let needed = expForLevel(p.level);
+  while(p.exp >= needed){
+    p.exp -= needed;
+    p.level += 1;
+    p.maxHp += 10;
+    p.hp = Math.min(p.maxHp, p.hp + p.maxHp*0.3);
+    showBanner("LEVEL UP! Lv "+p.level);
+    needed = expForLevel(p.level);
+  }
+}
+
+function spawnFloater(x,y,text,color){
+  floaters.push({x,y,text,color, life:0.9, vy:-40});
+}
+
+let bannerTimeout = null;
+function showBanner(text){
+  const el = document.getElementById("banner");
+  el.textContent = text;
+  el.style.opacity = "1";
+  el.style.transform = "translateX(-50%) translateY(0px)";
+  clearTimeout(bannerTimeout);
+  bannerTimeout = setTimeout(()=>{ el.style.opacity="0"; }, 1400);
+}
+
+/* ---------- Creeps ---------- */
+function spawnCreep(){
+  const brute = elapsed > 60 && Math.random() < Math.min(0.28, elapsed/900);
+  const margin = 60;
+  // spawn just outside camera view but inside world
+  let x,y;
+  const edge = Math.floor(rand(0,4));
+  if(edge===0){ x = clamp(player.x + rand(-900,900), margin, world.w-margin); y = margin; }
+  else if(edge===1){ x = world.w-margin; y = clamp(player.y + rand(-900,900), margin, world.h-margin); }
+  else if(edge===2){ x = clamp(player.x + rand(-900,900), margin, world.w-margin); y = world.h-margin; }
+  else { x = margin; y = clamp(player.y + rand(-900,900), margin, world.h-margin); }
+
+  const t = elapsed;
+  const hpScale = 1 + t/45;
+  const dmgScale = 1 + t/90;
+  creeps.push({
+    id: uid(), x, y,
+    radius: brute? 26: 15,
+    hp: (brute? 60: 16) * hpScale,
+    maxHp: (brute? 60: 16) * hpScale,
+    dmg: (brute? 14: 6) * dmgScale,
+    speed: brute? rand(50,70): rand(70,110),
+    expValue: brute? 26: 6,
+    brute,
+    hitTimers: {},
+    lastTouch: -9999,
+  });
+}
+
+let spawnTimer = 0;
+function updateCreepSpawning(dt){
+  const interval = clamp(2.2 - elapsed/60, 0.35, 2.2);
+  spawnTimer -= dt;
+  if(spawnTimer <= 0){
+    spawnTimer = interval;
+    if(creeps.length < 90) spawnCreep();
+  }
+}
+
+function updateCreeps(dt){
+  for(const c of creeps){
+    const dx = player.x-c.x, dy = player.y-c.y;
+    const d = Math.hypot(dx,dy)||1;
+    const stopDist = c.radius + player.radius - 4; // hover just inside contact range, stays in blade sweep zone
+    if(d > stopDist){
+      c.x += dx/d*c.speed*dt;
+      c.y += dy/d*c.speed*dt;
+    }
+
+    // contact damage to player
+    if(d < c.radius + player.radius){
+      tryDamagePlayer(player, c.dmg, c);
+    }
+  }
+  // light mutual separation so creeps don't stack exactly on top of each other
+  for(let i=0;i<creeps.length;i++){
+    for(let j=i+1;j<creeps.length;j++){
+      const a=creeps[i], b=creeps[j];
+      const dx=b.x-a.x, dy=b.y-a.y;
+      const d = Math.hypot(dx,dy)||0.01;
+      const minD = a.radius+b.radius;
+      if(d < minD){
+        const push = (minD-d)/2;
+        const nx=dx/d, ny=dy/d;
+        a.x -= nx*push; a.y -= ny*push;
+        b.x += nx*push; b.y += ny*push;
+      }
+    }
+  }
+}
+
+function trySwordHits(p, targetsAreCreeps){
+  const swords = p.swords;
+  if(swords.length===0) return;
+  const R = orbitRadius(p);
+  const now = performance.now();
+  for(let i=0;i<swords.length;i++){
+    const angle = p.spinAngle + (i/swords.length)*Math.PI*2;
+    const x1 = p.x + Math.cos(angle)*(R-SWORD_VISUAL_LEN*0.5);
+    const y1 = p.y + Math.sin(angle)*(R-SWORD_VISUAL_LEN*0.5);
+    const x2 = p.x + Math.cos(angle)*(R+SWORD_VISUAL_LEN*0.6);
+    const y2 = p.y + Math.sin(angle)*(R+SWORD_VISUAL_LEN*0.6);
+    if(targetsAreCreeps){
+      for(const c of creeps){
+        if(c.hp<=0) continue;
+        const dd = pointSegDist(c.x,c.y,x1,y1,x2,y2);
+        if(dd < BLADE_HALF_WIDTH + c.radius){
+          const last = c.hitTimers[i] || 0;
+          if(now-last > HIT_COOLDOWN){
+            c.hitTimers[i] = now;
+            const dmg = swords[i].dmg * p.bonusDmgMult;
+            c.hp -= dmg;
+            spawnFloater(c.x, c.y-c.radius, "-"+Math.round(dmg), "#ffd43b");
+            if(c.hp<=0){ killCreep(c); }
+          }
         }
+      }
+    }
+  }
+}
 
-        async function fetchPlayerScore() {
-            let { data } = await _supabase
-                .from('sword_war_saves')
-                .select('*')
-                .eq('username', playerName)
-                .single();
+function killCreep(c){
+  c.hp = 0;
+  gainExp(player, c.expValue, c.x, c.y);
+  kills++;
+  const dropChance = c.brute? 0.85 : 0.22;
+  if(Math.random() < dropChance){
+    pickups.push({ x:c.x+rand(-10,10), y:c.y+rand(-10,10), tier: c.brute? weightedBruteTier() : pickTier(), id: uid() });
+  }
+}
+function weightedBruteTier(){
+  const r = Math.random();
+  if(r<0.35) return SWORD_TIERS[3];
+  if(r<0.7) return SWORD_TIERS[2];
+  return SWORD_TIERS[1];
+}
 
-            if (data) {
-                score = data.score;
-                stage = data.stage;
-            } else {
-                await _supabase.from('sword_war_saves').insert([{ username: playerName, score: 0, stage: 1 }]);
-            }
+function tryDamagePlayer(p, dmg, source){
+  const now = performance.now();
+  if(now - p.lastHitAt < PLAYER_IFRAME) return;
+  p.lastHitAt = now;
+  p.hp -= dmg;
+  spawnFloater(p.x, p.y-p.radius-6, "-"+Math.round(dmg), "#ff5b5b");
+  if(p.hp<=0 && !p.dead){
+    p.dead = true;
+    onPlayerDeath();
+  }
+}
+
+/* ---------- Pickups ---------- */
+function spawnPickupsAmbient(dt){
+  state.pickupTimer = (state.pickupTimer||0) - dt;
+  if(state.pickupTimer<=0){
+    state.pickupTimer = rand(2.5,4.5);
+    if(pickups.length < 40){
+      pickups.push({
+        x: clamp(player.x+rand(-1000,1000), 40, world.w-40),
+        y: clamp(player.y+rand(-1000,1000), 40, world.h-40),
+        tier: pickTier(), id: uid()
+      });
+    }
+  }
+}
+const state = {};
+
+function updatePickups(){
+  for(let i=pickups.length-1;i>=0;i--){
+    const pu = pickups[i];
+    if(dist2(pu.x,pu.y,player.x,player.y) < (player.radius+14)*(player.radius+14)){
+      addSword(player, pu.tier);
+      spawnFloater(pu.x,pu.y,"+"+pu.tier.label,pu.tier.color);
+      pickups.splice(i,1);
+    }
+  }
+}
+
+/* ================= MULTIPLAYER ================= */
+function connectMultiplayer(){
+  if(!sb){ setConn(false,"supabase gagal dimuat"); return; }
+  roomCode = (document.getElementById("roomInput").value||"public").trim().toLowerCase() || "public";
+  channel = sb.channel("bladewar-"+roomCode, { config: { broadcast: { self:false }, presence: { key: myId } } });
+
+  channel.on("broadcast", {event:"state"}, ({payload})=>{
+    if(payload.id===myId) return;
+    remotePlayers.set(payload.id, { ...payload, lastSeen: performance.now() });
+  });
+
+  channel.on("broadcast", {event:"hit"}, ({payload})=>{
+    if(payload.targetId !== myId) return;
+    tryDamagePlayer(player, payload.dmg, null);
+  });
+
+  channel.on("broadcast", {event:"death"}, ({payload})=>{
+    remotePlayers.delete(payload.id);
+  });
+
+  channel.subscribe((status)=>{
+    if(status==="SUBSCRIBED"){ setConn(true, "room: "+roomCode); }
+    else if(status==="CHANNEL_ERROR" || status==="TIMED_OUT"){ setConn(false, "koneksi gagal"); }
+    else if(status==="CLOSED"){ setConn(false, "terputus"); }
+  });
+}
+
+function disconnectMultiplayer(){
+  if(channel){
+    try{ channel.send({type:"broadcast", event:"death", payload:{id:myId}}); }catch(e){}
+    try{ sb.removeChannel(channel); }catch(e){}
+    channel = null;
+  }
+  remotePlayers.clear();
+}
+
+function setConn(ok, text){
+  const box = document.getElementById("connstatus");
+  box.classList.remove("hidden");
+  document.getElementById("connDot").className = "dot " + (ok?"ok":"bad");
+  document.getElementById("connText").textContent = text;
+}
+
+function broadcastState(){
+  if(!channel) return;
+  const now = performance.now();
+  if(now - lastBroadcast < BROADCAST_INTERVAL) return;
+  lastBroadcast = now;
+  channel.send({ type:"broadcast", event:"state", payload:{
+    id: myId, name: playerName, color: myColor,
+    x: player.x, y: player.y, level: player.level,
+    hp: player.hp, maxHp: player.maxHp,
+    swordCount: player.swords.length,
+    spinAngle: player.spinAngle,
+    orbitR: orbitRadius(player),
+  }});
+}
+
+function pruneRemotePlayers(){
+  const now = performance.now();
+  for(const [id,rp] of remotePlayers){
+    if(now - rp.lastSeen > 5000) remotePlayers.delete(id);
+  }
+}
+
+function checkPvpHits(){
+  if(!channel) return;
+  const R = orbitRadius(player);
+  const now = performance.now();
+  for(let i=0;i<player.swords.length;i++){
+    const angle = player.spinAngle + (i/player.swords.length)*Math.PI*2;
+    const x1 = player.x + Math.cos(angle)*(R-SWORD_VISUAL_LEN*0.5);
+    const y1 = player.y + Math.sin(angle)*(R-SWORD_VISUAL_LEN*0.5);
+    const x2 = player.x + Math.cos(angle)*(R+SWORD_VISUAL_LEN*0.6);
+    const y2 = player.y + Math.sin(angle)*(R+SWORD_VISUAL_LEN*0.6);
+    for(const [id, rp] of remotePlayers){
+      const dd = pointSegDist(rp.x,rp.y,x1,y1,x2,y2);
+      if(dd < BLADE_HALF_WIDTH+16){
+        rp._hitTimers = rp._hitTimers || {};
+        const last = rp._hitTimers[i] || 0;
+        if(now-last > HIT_COOLDOWN){
+          rp._hitTimers[i] = now;
+          const dmg = player.swords[i].dmg * player.bonusDmgMult;
+          channel.send({type:"broadcast", event:"hit", payload:{ targetId:id, dmg, fromId: myId }});
+          spawnFloater(rp.x, rp.y-20, "-"+Math.round(dmg), "#ffd43b");
         }
+      }
+    }
+  }
+}
 
-        // Kontrol klik untuk melempar pedang
-        canvas.addEventListener('click', (e) => {
-            let rect = canvas.getBoundingClientRect();
-            let mouseX = e.clientX - rect.left;
-            let mouseY = e.clientY - rect.top;
+/* ================= UPDATE LOOP ================= */
+let lastT = 0;
+function loop(t){
+  if(!running) return;
+  if(!lastT) lastT = t;
+  let dt = (t-lastT)/1000;
+  lastT = t;
+  dt = Math.min(dt, 0.05);
 
-            // Tambahkan pedang meluncur ke arah klik/musuh
-            swords.push({ x: 200, y: 450, targetX: mouseX, targetY: mouseY, active: true });
-        });
+  elapsed += dt;
 
-        function update() {
-            // Gerakkan musuh mondar-mandir
-            enemy.x += enemy.speed;
-            if (enemy.x > 350 || enemy.x < 50) {
-                enemy.speed *= -1;
-            }
+  updatePlayerMovement(dt);
+  player.spinAngle += spinSpeed(player)*dt;
 
-            // Update posisi pedang yang dilempar
-            swords.forEach((sword, index) => {
-                sword.y -= 10; // Gerak ke atas
-                // Deteksi kena musuh sederhana
-                let dist = Math.hypot(sword.x - enemy.x, sword.y - enemy.y);
-                if (dist < enemy.radius + 10) {
-                    score += 10;
-                    stage = Math.floor(score / 50) + 1;
-                    swords.splice(index, 1);
-                    // Reset posisi musuh & percepat sedikit
-                    enemy.x = Math.random() * 300 + 50;
-                    enemy.speed = (enemy.speed > 0 ? 1 : -1) * (2 + stage * 0.5);
-                } else if (sword.y < 0) {
-                    swords.splice(index, 1);
-                }
-            });
-        }
+  if(mode==="survival"){
+    updateCreepSpawning(dt);
+    updateCreeps(dt);
+    trySwordHits(player, true);
+    spawnPickupsAmbient(dt);
+  } else if(mode==="multiplayer"){
+    broadcastState();
+    checkPvpHits();
+    pruneRemotePlayers();
+  }
+  updatePickups();
+  updateFloaters(dt);
 
-        function draw() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+  camera.x = player.x;
+  camera.y = player.y;
 
-            // Gambar Musuh (Titan/Monster)
-            ctx.beginPath();
-            ctx.arc(enemy.x, enemy.y, enemy.radius, 0, Math.PI * 2);
-            ctx.fillStyle = '#ef4444';
-            ctx.fill();
-            ctx.closePath();
-            ctx.fillStyle = 'white';
-            ctx.font = '12px sans-serif';
-            ctx.fillText('Titan', enemy.x - 15, enemy.y - 35);
+  render();
+  updateHUD();
 
-            // Gambar Pedang-pedang yang dilempar
-            swords.forEach(sword => {
-                ctx.fillStyle = '#38bdf8';
-                ctx.fillRect(sword.x - 3, sword.y, 6, 20);
-            });
+  if(player.hp<=0 && !resultsShown){
+    // handled in onPlayerDeath
+  }
 
-            // Gambar Karakter Pemain di bawah
-            ctx.fillStyle = '#22c55e';
-            ctx.fillRect(180, 460, 40, 30);
-            ctx.fillStyle = 'white';
-            ctx.fillText('Kesatria', 178, 450);
+  requestAnimationFrame(loop);
+}
 
-            // Update Teks UI
-            document.getElementById('score-display').innerText = score;
-            document.getElementById('stage-display').innerText = stage;
-        }
+function updateFloaters(dt){
+  for(let i=floaters.length-1;i>=0;i--){
+    const f = floaters[i];
+    f.life -= dt; f.y += f.vy*dt;
+    if(f.life<=0) floaters.splice(i,1);
+  }
+}
 
-        function loop() {
-            update();
-            draw();
-            requestAnimationFrame(loop);
-        }
+function updatePlayerMovement(dt){
+  let dx=0, dy=0;
+  if(keys["w"]||keys["arrowup"]) dy -= 1;
+  if(keys["s"]||keys["arrowdown"]) dy += 1;
+  if(keys["a"]||keys["arrowleft"]) dx -= 1;
+  if(keys["d"]||keys["arrowright"]) dx += 1;
+  if(joy.active){ dx += joy.dx; dy += joy.dy; }
+  const len = Math.hypot(dx,dy);
+  if(len>0){ dx/=len; dy/=len; }
+  else if(joy.active){ dx = joy.dx; dy = joy.dy; }
 
-        async function saveProgress() {
-            const { error } = await _supabase
-                .from('sword_war_saves')
-                .update({ score: score, stage: stage })
-                .eq('username', playerName);
+  player.x = clamp(player.x + dx*player.speed*dt, player.radius, world.w-player.radius);
+  player.y = clamp(player.y + dy*player.speed*dt, player.radius, world.h-player.radius);
+  if(dx||dy) player.facing = Math.atan2(dy,dx);
+}
 
-            if (error) {
-                alert('Gagal simpan: ' + error.message);
-            } else {
-                alert('⚔️ Progress perang pedang tersimpan ke Supabase!');
-            }
-        }
-    </script>
+/* ================= RENDER ================= */
+function worldToScreen(x,y){
+  return { x: x - camera.x + canvas.width/2, y: y - camera.y + canvas.height/2 };
+}
+
+function render(){
+  ctx.fillStyle = "#0b0d14";
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  drawGrid();
+  drawWorldBounds();
+
+  for(const pu of pickups) drawPickup(pu);
+  for(const c of creeps) if(c.hp>0) drawCreep(c);
+
+  if(mode==="multiplayer"){
+    for(const [id,rp] of remotePlayers) drawRemotePlayer(rp);
+  }
+
+  drawPlayer(player, myColor, playerName, true);
+
+  for(const f of floaters) drawFloater(f);
+}
+
+function drawGrid(){
+  const size = 100;
+  ctx.strokeStyle = "rgba(255,255,255,0.045)";
+  ctx.lineWidth = 1;
+  const startX = -((camera.x - canvas.width/2) % size);
+  const startY = -((camera.y - canvas.height/2) % size);
+  ctx.beginPath();
+  for(let x=startX; x<canvas.width; x+=size){ ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); }
+  for(let y=startY; y<canvas.height; y+=size){ ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); }
+  ctx.stroke();
+}
+
+function drawWorldBounds(){
+  const tl = worldToScreen(0,0);
+  ctx.strokeStyle = "rgba(255,91,91,0.5)";
+  ctx.lineWidth = 4;
+  ctx.strokeRect(tl.x, tl.y, world.w, world.h);
+}
+
+function drawSwordShape(x,y,angle,color,len){
+  ctx.save();
+  ctx.translate(x,y);
+  ctx.rotate(angle);
+  ctx.beginPath();
+  ctx.moveTo(len*0.6,0);
+  ctx.lineTo(0,-len*0.22);
+  ctx.lineTo(-len*0.5,0);
+  ctx.lineTo(0,len*0.22);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.shadowColor = color; ctx.shadowBlur = 8;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.restore();
+}
+
+function drawOrbitSwords(p, screen){
+  const R = orbitRadius(p);
+  for(let i=0;i<p.swords.length;i++){
+    const angle = p.spinAngle + (i/p.swords.length)*Math.PI*2;
+    const sx = screen.x + Math.cos(angle)*R;
+    const sy = screen.y + Math.sin(angle)*R;
+    drawSwordShape(sx, sy, angle, p.swords[i].color, 34);
+  }
+}
+
+function drawPlayer(p, color, name, isMe){
+  const s = worldToScreen(p.x,p.y);
+  drawOrbitSwords(p, s);
+
+  const flash = isMe && (performance.now()-p.lastHitAt < 150);
+  ctx.beginPath();
+  ctx.arc(s.x,s.y,p.radius,0,Math.PI*2);
+  ctx.fillStyle = flash? "#ffffff" : color;
+  ctx.fill();
+  ctx.lineWidth=3; ctx.strokeStyle="rgba(0,0,0,0.4)"; ctx.stroke();
+
+  // facing indicator
+  ctx.beginPath();
+  ctx.moveTo(s.x+Math.cos(p.facing)*p.radius, s.y+Math.sin(p.facing)*p.radius);
+  ctx.lineTo(s.x+Math.cos(p.facing-2.6)*p.radius*0.5, s.y+Math.sin(p.facing-2.6)*p.radius*0.5);
+  ctx.lineTo(s.x+Math.cos(p.facing+2.6)*p.radius*0.5, s.y+Math.sin(p.facing+2.6)*p.radius*0.5);
+  ctx.closePath(); ctx.fillStyle="rgba(255,255,255,0.35)"; ctx.fill();
+
+  // name + hp bar
+  ctx.font = "bold 12px sans-serif"; ctx.textAlign="center";
+  ctx.fillStyle="#fff";
+  ctx.fillText(name+" · Lv"+p.level, s.x, s.y-p.radius-22);
+  const bw=44, bh=5;
+  ctx.fillStyle="rgba(0,0,0,0.4)"; ctx.fillRect(s.x-bw/2, s.y-p.radius-16, bw, bh);
+  const hpPct = clamp(p.hp/p.maxHp,0,1);
+  ctx.fillStyle = hpPct>0.4? "#51cf66":"#ff5b5b";
+  ctx.fillRect(s.x-bw/2, s.y-p.radius-16, bw*hpPct, bh);
+}
+
+function drawRemotePlayer(rp){
+  const s = worldToScreen(rp.x, rp.y);
+  if(s.x<-80||s.x>canvas.width+80||s.y<-80||s.y>canvas.height+80) return;
+  const fakeP = { swords: new Array(rp.swordCount||0).fill(0).map(()=>({color:"#8899ff"})), spinAngle: rp.spinAngle||0 };
+  const R = rp.orbitR || (BASE_ORBIT_RADIUS + ((rp.swordCount||1)-1)*ORBIT_RADIUS_PER_SWORD);
+  for(let i=0;i<(rp.swordCount||0);i++){
+    const angle = (rp.spinAngle||0) + (i/(rp.swordCount||1))*Math.PI*2;
+    const sx = s.x + Math.cos(angle)*R;
+    const sy = s.y + Math.sin(angle)*R;
+    drawSwordShape(sx, sy, angle, "#9aa8ff", 30);
+  }
+  ctx.beginPath(); ctx.arc(s.x,s.y,16,0,Math.PI*2);
+  ctx.fillStyle = rp.color || "#88f"; ctx.fill();
+  ctx.lineWidth=3; ctx.strokeStyle="rgba(0,0,0,0.4)"; ctx.stroke();
+  ctx.font="bold 12px sans-serif"; ctx.textAlign="center"; ctx.fillStyle="#fff";
+  ctx.fillText((rp.name||"?")+" · Lv"+(rp.level||1), s.x, s.y-34);
+  const bw=40,bh=4;
+  ctx.fillStyle="rgba(0,0,0,0.4)"; ctx.fillRect(s.x-bw/2, s.y-28, bw, bh);
+  const pct = clamp((rp.hp||0)/(rp.maxHp||100),0,1);
+  ctx.fillStyle = pct>0.4?"#51cf66":"#ff5b5b";
+  ctx.fillRect(s.x-bw/2, s.y-28, bw*pct, bh);
+}
+
+function drawCreep(c){
+  const s = worldToScreen(c.x,c.y);
+  if(s.x<-60||s.x>canvas.width+60||s.y<-60||s.y>canvas.height+60) return;
+  ctx.beginPath(); ctx.arc(s.x,s.y,c.radius,0,Math.PI*2);
+  ctx.fillStyle = c.brute? "#a13b3b" : "#5c6b8a";
+  ctx.fill();
+  ctx.lineWidth=2; ctx.strokeStyle="rgba(0,0,0,0.4)"; ctx.stroke();
+  const bw=c.radius*2, bh=4;
+  ctx.fillStyle="rgba(0,0,0,0.5)"; ctx.fillRect(s.x-bw/2, s.y-c.radius-10, bw, bh);
+  ctx.fillStyle="#ff5b5b"; ctx.fillRect(s.x-bw/2, s.y-c.radius-10, bw*clamp(c.hp/c.maxHp,0,1), bh);
+}
+
+function drawPickup(pu){
+  const s = worldToScreen(pu.x,pu.y);
+  if(s.x<-40||s.x>canvas.width+40||s.y<-40||s.y>canvas.height+40) return;
+  const bob = Math.sin(performance.now()/300 + pu.x)*4;
+  drawSwordShape(s.x, s.y+bob, performance.now()/600, pu.tier.color, 26);
+}
+
+function drawFloater(f){
+  const s = worldToScreen(f.x,f.y);
+  ctx.globalAlpha = clamp(f.life/0.9,0,1);
+  ctx.font="bold 13px sans-serif"; ctx.textAlign="center";
+  ctx.fillStyle = f.color;
+  ctx.fillText(f.text, s.x, s.y);
+  ctx.globalAlpha = 1;
+}
+
+/* ================= HUD ================= */
+function updateHUD(){
+  document.getElementById("hudName").textContent = playerName;
+  document.getElementById("hudLevel").textContent = "Lv "+player.level;
+  document.getElementById("hpbar").style.width = clamp(player.hp/player.maxHp,0,1)*100+"%";
+  const needed = expForLevel(player.level);
+  document.getElementById("expbar").style.width = clamp(player.exp/needed,0,1)*100+"%";
+  document.getElementById("hudSwords").textContent = player.swords.length+"/"+MAX_SWORDS;
+  document.getElementById("hudKills").textContent = kills;
+  document.getElementById("hudTimer").textContent = fmtTime(elapsed);
+  document.getElementById("hudMode").textContent = mode==="survival"?"SURVIVAL":"ARENA";
+
+  if(mode==="multiplayer"){
+    const rosterBox = document.getElementById("roster");
+    rosterBox.classList.remove("hidden");
+    const list = [{name:playerName+" (kamu)", level:player.level}];
+    for(const [id,rp] of remotePlayers) list.push({name:rp.name||"?", level:rp.level||1});
+    list.sort((a,b)=>b.level-a.level);
+    document.getElementById("rosterList").innerHTML = list.slice(0,8).map(r=>
+      `<div class="roster-row"><span>${escapeHtml(r.name)}</span><span>Lv${r.level}</span></div>`
+    ).join("");
+  } else {
+    document.getElementById("roster").classList.add("hidden");
+  }
+}
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+/* ================= LIFECYCLE ================= */
+let resultsShown = false;
+
+function startGame(selMode){
+  playerName = (document.getElementById("nameInput").value||"Player").trim().slice(0,14) || "Player";
+  mode = selMode;
+  world = selMode==="survival"? {w:4000,h:4000} : {w:2400,h:2400};
+  player = newPlayer();
+  player.x = world.w/2; player.y = world.h/2;
+  creeps = []; pickups = []; particles = []; floaters = [];
+  elapsed = 0; kills = 0; spawnTimer = 0; resultsShown = false;
+  remotePlayers.clear();
+
+  document.getElementById("menu").classList.add("hidden");
+  document.getElementById("results").classList.add("hidden");
+  document.getElementById("hud").classList.remove("hidden");
+
+  if(selMode==="multiplayer"){ connectMultiplayer(); }
+  else { document.getElementById("connstatus").classList.add("hidden"); }
+
+  running = true; lastT = 0;
+  requestAnimationFrame(loop);
+}
+
+function onPlayerDeath(){
+  running = false;
+  resultsShown = true;
+  if(mode==="multiplayer" && channel){
+    channel.send({type:"broadcast", event:"death", payload:{id:myId}});
+  }
+  document.getElementById("resTitle").textContent = mode==="survival"? "Kamu Tumbang!" : "Kamu Kalah!";
+  document.getElementById("resTime").textContent = fmtTime(elapsed);
+  document.getElementById("resLevel").textContent = player.level;
+  document.getElementById("resKills").textContent = kills;
+  document.getElementById("btnSubmitScore").classList.toggle("hidden", mode!=="survival");
+  document.getElementById("results").classList.remove("hidden");
+  document.getElementById("hud").classList.add("hidden");
+  if(mode==="multiplayer") disconnectMultiplayer();
+}
+
+document.getElementById("btnSurvival").addEventListener("click", ()=>startGame("survival"));
+document.getElementById("btnMulti").addEventListener("click", ()=>startGame("multiplayer"));
+document.getElementById("btnBackMenu").addEventListener("click", ()=>{
+  document.getElementById("results").classList.add("hidden");
+  document.getElementById("menu").classList.remove("hidden");
+  document.getElementById("connstatus").classList.add("hidden");
+  loadLeaderboard();
+});
+document.getElementById("btnSubmitScore").addEventListener("click", async ()=>{
+  const btn = document.getElementById("btnSubmitScore");
+  btn.disabled = true; btn.textContent = "Mengirim…";
+  try{
+    if(sb){
+      await sb.from("bladewar_scores").insert({
+        name: playerName, level: player.level, time_survived: Math.floor(elapsed), kills: kills
+      });
+      btn.textContent = "Terkirim!";
+    } else {
+      btn.textContent = "Gagal (no supabase)";
+    }
+  }catch(e){
+    console.warn("submit score failed", e);
+    btn.textContent = "Gagal kirim";
+  }
+});
+
+/* ================= LEADERBOARD ================= */
+async function loadLeaderboard(){
+  const box = document.getElementById("lbList");
+  if(!sb){ box.innerHTML = '<div class="lb-empty">Supabase tidak tersedia.</div>'; return; }
+  try{
+    const { data, error } = await sb.from("bladewar_scores")
+      .select("name,level,time_survived,kills")
+      .order("level", {ascending:false})
+      .order("time_survived", {ascending:false})
+      .limit(10);
+    if(error) throw error;
+    if(!data || data.length===0){ box.innerHTML = '<div class="lb-empty">Belum ada skor. Jadilah yang pertama!</div>'; return; }
+    box.innerHTML = data.map((row,i)=>
+      `<div class="lb-row"><span>${i+1}.</span><span style="flex:1">${escapeHtml(row.name)}</span><span>Lv${row.level} · ${fmtTime(row.time_survived)}</span></div>`
+    ).join("");
+  }catch(e){
+    console.warn("leaderboard load failed", e);
+    box.innerHTML = '<div class="lb-empty">Belum ada tabel skor di Supabase (lihat setup SQL).</div>';
+  }
+}
+loadLeaderboard();
+
+})();
+</script>
 </body>
 </html>
