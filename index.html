@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Bladewar</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20rx='14'%20fill='%2312141f'/%3E%3Cdefs%3E%3ClinearGradient%20id='g'%20x1='0'%20y1='-26'%20x2='0'%20y2='26'%20gradientUnits='userSpaceOnUse'%3E%3Cstop%20offset='0'%20stop-color='%23ffd43b'/%3E%3Cstop%20offset='0.5'%20stop-color='%23ff9b4d'/%3E%3Cstop%20offset='1'%20stop-color='%23ff5b5b'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cg%20transform='translate(32,32)%20rotate(45)'%3E%3Cpath%20d='M0,-26%20L4,-9%20L4,-4%20L9,-4%20L9,0%20L3,0%20L3,20%20L5,23%20L0,26%20L-5,23%20L-3,20%20L-3,0%20L-9,0%20L-9,-4%20L-4,-4%20L-4,-9%20Z'%20fill='url(%23g)'%20stroke='%23331100'%20stroke-width='1'/%3E%3C/g%3E%3C/svg%3E">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
   :root{
@@ -33,14 +34,20 @@
 
   /* ---------- Menu ---------- */
   #menu{
-    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
-    background: radial-gradient(ellipse at center, #1a1f33 0%, #05060a 100%);
-    z-index: 10;
+    position:absolute; inset:0; overflow-y:auto; z-index: 10;
+    background: radial-gradient(ellipse at 50% 30%, #1a1f33 0%, #05060a 100%);
   }
+  .poster-bg{ position:absolute; inset:0; width:100%; height:100%; z-index:0; pointer-events:none; }
+  .menu-wrap{
+    position:relative; z-index:1; display:flex; flex-wrap:wrap; gap:22px;
+    max-width:1180px; width:100%; margin:0 auto; padding: 40px 20px 60px; justify-content:center;
+  }
+  .menu-col{ display:flex; flex-direction:column; gap:18px; flex:1 1 300px; min-width:280px; max-width:400px; }
+
   .menu-card{
     background: rgba(21,24,38,0.9); border: 1px solid #2b3050; border-radius: 16px;
-    padding: 32px 36px; width: min(420px, 92vw); backdrop-filter: blur(6px);
-    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    padding: 32px 32px; width: min(400px, 92vw); flex-shrink:0; backdrop-filter: blur(6px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5); align-self:flex-start;
   }
   .title{
     font-size: 40px; font-weight: 800; text-align:center; letter-spacing: 2px;
@@ -48,6 +55,7 @@
     -webkit-background-clip: text; background-clip: text; color: transparent;
     margin: 0 0 4px 0;
   }
+  .title::before{ content:"⚔ "; -webkit-text-fill-color:#ffa94d; }
   .subtitle{ text-align:center; color: var(--text-dim); font-size: 13px; margin-bottom: 22px; }
   label{ font-size: 12px; color: var(--text-dim); display:block; margin: 14px 0 6px; }
   input[type=text]{
@@ -68,9 +76,23 @@
   .row{ display:flex; gap:10px; }
   .row > *{ flex:1; }
 
-  #leaderboard{ margin-top: 20px; border-top: 1px solid #262b45; padding-top: 14px; }
-  #leaderboard h3{ margin: 0 0 8px; font-size: 13px; color: var(--text-dim); font-weight:600; letter-spacing:.5px; text-transform:uppercase;}
-  .lb-row{ display:flex; justify-content:space-between; font-size: 13px; padding: 4px 0; color: var(--text); }
+  .mode-toggle{ display:flex; gap:8px; }
+  .mode-btn{
+    flex:1; padding:10px 8px; border-radius:10px; border:1px solid #333955; background:#171a2b;
+    color:var(--text-dim); font-weight:700; font-size:12.5px; cursor:pointer; font-family:inherit;
+  }
+  .mode-btn.active{ background:#262b45; color:var(--text); border-color:var(--accent-2); }
+
+  #leaderboard, .side-panel{
+    background: rgba(21,24,38,0.88); border:1px solid #2b3050; border-radius: 16px;
+    padding: 20px 20px; backdrop-filter: blur(6px); box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+    display:flex; flex-direction:column; max-height:420px;
+  }
+  #leaderboard h3, .side-panel h3{
+    margin: 0 0 12px; font-size: 13px; color: var(--text-dim); font-weight:700; letter-spacing:.5px; text-transform:uppercase;
+  }
+  .panel-body{ overflow-y:auto; flex:1; padding-right:2px; }
+  .lb-row{ display:flex; justify-content:space-between; font-size: 13px; padding: 6px 0; color: var(--text); }
   .lb-row span:first-child{ color: var(--text-dim); width: 24px; display:inline-block;}
   .lb-empty{ font-size:12px; color:var(--text-dim); }
 
@@ -168,33 +190,18 @@
   .result-stats div{ font-size:18px; font-weight:800; }
   .result-stats span{ display:block; font-size:11px; color:var(--text-dim); font-weight:500; margin-top:2px;}
 
-  /* ---------- Gallery ---------- */
-  #galleryModal{
-    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
-    background: rgba(5,6,10,0.85); z-index:30;
-  }
-  .gallery-card{
-    background: var(--panel); border:1px solid #2b3050; border-radius:16px; padding:24px 26px;
-    width:min(480px,92vw); max-height:82vh; display:flex; flex-direction:column;
-  }
-  .gallery-tabs{ display:flex; gap:8px; margin-bottom:14px; }
-  .gtab{
-    flex:1; padding:9px; border-radius:9px; border:1px solid #333955; background:#171a2b; color:var(--text-dim);
-    font-weight:700; font-size:13px; cursor:pointer;
-  }
-  .gtab.active{ background:#262b45; color:var(--text); border-color:var(--accent-2); }
-  .gallery-body{ overflow-y:auto; flex:1; margin-bottom:14px; padding-right:4px; }
+  /* ---------- Gallery items (used inline in the side panels on the menu) ---------- */
   .gitem{
-    display:flex; gap:12px; padding:12px; border-radius:12px; background:#171a2b; margin-bottom:10px;
+    display:flex; gap:10px; padding:10px; border-radius:12px; background:#171a2b; margin-bottom:8px;
     border-left:4px solid #444;
   }
   .gitem-icon{
-    width:40px; height:40px; border-radius:10px; flex-shrink:0; display:flex; align-items:center; justify-content:center;
-    font-size:20px; font-weight:800; background:#0f111c;
+    width:34px; height:34px; border-radius:9px; flex-shrink:0; display:flex; align-items:center; justify-content:center;
+    font-size:17px; font-weight:800; background:#0f111c;
   }
-  .gitem-body h4{ margin:0 0 3px; font-size:14px; }
-  .gitem-body .meta{ font-size:11px; color:var(--text-dim); margin-bottom:4px; }
-  .gitem-body p{ margin:0; font-size:12.5px; color:#c3c7db; line-height:1.4; }
+  .gitem-body h4{ margin:0 0 3px; font-size:13px; }
+  .gitem-body .meta{ font-size:10.5px; color:var(--text-dim); margin-bottom:3px; }
+  .gitem-body p{ margin:0; font-size:11.5px; color:#c3c7db; line-height:1.35; }
 
   #connstatus{
     position:absolute; bottom:14px; left:14px; font-size:11px; color: var(--text-dim);
@@ -226,25 +233,67 @@
 <canvas id="game"></canvas>
 
 <div id="menu">
-  <div class="menu-card">
-    <div class="title">BLADEWAR</div>
-    <div class="subtitle">Kumpulin pedang, spin, bantai musuh.</div>
+  <svg class="poster-bg" viewBox="0 0 800 800" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <defs>
+      <linearGradient id="swordGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#ffd43b"/>
+        <stop offset="0.5" stop-color="#ff9b4d"/>
+        <stop offset="1" stop-color="#ff5b5b"/>
+      </linearGradient>
+      <radialGradient id="posterGlow" cx="50%" cy="38%" r="60%">
+        <stop offset="0" stop-color="#3a2550" stop-opacity="0.55"/>
+        <stop offset="1" stop-color="#05060a" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    <rect width="800" height="800" fill="url(#posterGlow)"/>
+    <g transform="translate(400,380)" opacity="0.15">
+      <g transform="rotate(45)"><path d="M0,-320 L26,-110 L26,-46 L58,-46 L58,-14 L20,-14 L20,230 L34,258 L0,300 L-34,258 L-20,230 L-20,-14 L-58,-14 L-58,-46 L-26,-46 L-26,-110 Z" fill="url(#swordGrad)"/></g>
+      <g transform="rotate(-45)"><path d="M0,-320 L26,-110 L26,-46 L58,-46 L58,-14 L20,-14 L20,230 L34,258 L0,300 L-34,258 L-20,230 L-20,-14 L-58,-14 L-58,-46 L-26,-46 L-26,-110 Z" fill="url(#swordGrad)"/></g>
+    </g>
+  </svg>
 
-    <label for="nameInput">Nama Kamu</label>
-    <input type="text" id="nameInput" maxlength="14" placeholder="Player">
+  <div class="menu-wrap">
+    <div class="menu-card">
+      <div class="title">BLADEWAR</div>
+      <div class="subtitle">Kumpulin pedang, spin, bantai musuh.</div>
 
-    <button class="btn btn-survival" id="btnSurvival">⚔ Survival (Single Player)</button>
+      <label for="nameInput">Nama Kamu</label>
+      <input type="text" id="nameInput" maxlength="14" placeholder="Player">
 
-    <label for="roomInput" style="margin-top:18px;">Kode Room Multiplayer</label>
-    <div class="row">
-      <input type="text" id="roomInput" maxlength="16" placeholder="public" value="public">
+      <button class="btn btn-survival" id="btnSurvival">⚔ Survival (Single Player)</button>
+
+      <label for="roomInput" style="margin-top:18px;">Kode Room Multiplayer</label>
+      <div class="row">
+        <input type="text" id="roomInput" maxlength="16" placeholder="public" value="public">
+      </div>
+      <label style="margin-top:14px;">Mode Multiplayer</label>
+      <div class="mode-toggle">
+        <button type="button" class="mode-btn active" id="btnModeVersus">⚔ Saling Lawan</button>
+        <button type="button" class="mode-btn" id="btnModeCoop">🤝 Berteman</button>
+      </div>
+      <button class="btn btn-mp" id="btnMulti">🌐 Masuk Multiplayer</button>
     </div>
-    <button class="btn btn-mp" id="btnMulti">🌐 Masuk Multiplayer</button>
-    <button class="btn btn-secondary" id="btnGallery">📖 Galeri Pedang &amp; Skill</button>
 
-    <div id="leaderboard">
-      <h3>Top Survival</h3>
-      <div id="lbList"><div class="lb-empty">Memuat…</div></div>
+    <div class="menu-col">
+      <div class="side-panel">
+        <h3>Galeri Musuh</h3>
+        <div id="enemyGallery" class="panel-body"></div>
+      </div>
+      <div class="side-panel">
+        <h3>Galeri Skill</h3>
+        <div id="skillGallery" class="panel-body"></div>
+      </div>
+    </div>
+
+    <div class="menu-col">
+      <div class="side-panel">
+        <h3>Galeri Senjata</h3>
+        <div id="swordGallery" class="panel-body"></div>
+      </div>
+      <div id="leaderboard">
+        <h3>Top Survival</h3>
+        <div id="lbList" class="panel-body"><div class="lb-empty">Memuat…</div></div>
+      </div>
     </div>
   </div>
 </div>
@@ -297,17 +346,6 @@
     <p>Progress kamu (level &amp; waktu bertahan) bakal otomatis kesimpen ke leaderboard sebelum keluar.</p>
     <button class="btn btn-secondary" id="btnResumeGame">Lanjut Main</button>
     <button class="btn btn-survival" id="btnConfirmExit">Simpan &amp; Keluar</button>
-  </div>
-</div>
-
-<div id="galleryModal" class="hidden">
-  <div class="gallery-card">
-    <div class="gallery-tabs">
-      <button class="gtab active" data-tab="swords">⚔ Pedang</button>
-      <button class="gtab" data-tab="skills">✨ Skill</button>
-    </div>
-    <div id="galleryBody" class="gallery-body"></div>
-    <button class="btn btn-secondary" id="btnCloseGallery">Tutup</button>
   </div>
 </div>
 
@@ -383,6 +421,9 @@ const SKILLS = [
   { key:"heal", label:"Heal", icon:"✚", color:"#51cf66",
     desc:"Otomatis mulihin sebagian besar HP-mu setiap 12 detik. Sustain pasif buat bertahan lebih lama.",
     cooldown: 12000, healPct: 0.35 },
+  { key:"knockback", label:"Hentak", icon:"🌀", color:"#8be9ff",
+    desc:"Otomatis menghentak semua musuh di sekitarmu menjauh secara melingkar setiap 9 detik. Bagus buat ngasih jarak pas dikepung.",
+    cooldown: 9000, radius: 210, force: 240 },
 ];
 function skillByKey(key){ return SKILLS.find(s=>s.key===key); }
 function skillLevelMult(level){ return 1 + (level-1)*0.25; } // +25% effect per level (max lvl 5 => +100%)
@@ -502,6 +543,10 @@ function playBlood(){
   playTone(320, 0.18, "sine", 0.1, 140);
 }
 function playPoison(){ playTone(260, 0.25, "triangle", 0.12, 150); }
+function playKnockback(){
+  playTone(140, 0.18, "sine", 0.18, 300);
+  setTimeout(()=>playTone(90, 0.22, "sine", 0.14, 180), 60);
+}
 function playHeal(){ playTone(500, 0.16, "sine", 0.14, 780); setTimeout(()=>playTone(700,0.18,"sine",0.12,1000), 100); }
 function playSkillGet(){ playTone(600, 0.1, "sine", 0.13, 1100); setTimeout(()=>playTone(900,0.12,"sine",0.1,1400), 80); }
 function playBossRoar(){
@@ -607,6 +652,7 @@ let roomCode = "public";
 let remotePlayers = new Map(); // id -> {x,y,name,color,level,hp,maxHp,swords,spinAngle,lastSeen}
 let lastBroadcast = 0;
 const BROADCAST_INTERVAL = 90; // ms
+let pvpMode = true; // multiplayer only: true = "Saling Lawan" (damage flows), false = "Berteman" (co-op, no PvP damage)
 
 function newPlayer(){
   return {
@@ -696,8 +742,9 @@ function getNearbyTargets(x, y, range){
     const d = Math.hypot(c.x-x, c.y-y);
     if(d<=range) list.push({ type:"creep", ref:c, x:c.x, y:c.y, d });
   }
-  if(mode==="multiplayer"){
+  if(mode==="multiplayer" && pvpMode){
     for(const [id,rp] of remotePlayers){
+      if(rp.pvp === false) continue; // respect the other player's "Berteman" choice
       const d = Math.hypot(rp.x-x, rp.y-y);
       if(d<=range) list.push({ type:"remote", ref:rp, id, x:rp.x, y:rp.y, d });
     }
@@ -753,6 +800,20 @@ function runSkillEffect(def, slot, p){
     p.hp = Math.min(p.maxHp, p.hp + healed);
     spawnFloater(p.x, p.y-p.radius-20, "+"+Math.round(healed), "#51cf66");
     playHeal();
+  } else if(def.key === "knockback"){
+    const force = def.force*mult;
+    novaEffects.push({ x:p.x, y:p.y, radius:10, maxRadius:def.radius, life:0.35, maxLife:0.35, color:def.color });
+    for(const c of creeps){
+      if(c.hp<=0) continue;
+      const dx = c.x-p.x, dy = c.y-p.y;
+      const d = Math.hypot(dx,dy)||1;
+      if(d > def.radius) continue;
+      const nx = dx/d, ny = dy/d;
+      c.x = clamp(c.x + nx*force, c.radius, world.w-c.radius);
+      c.y = clamp(c.y + ny*force, c.radius, world.h-c.radius);
+      c.knockUntil = performance.now()+420; // brief stagger so the push actually reads before AI resumes
+    }
+    playKnockback();
   }
 }
 
@@ -1002,12 +1063,16 @@ function spawnBoss(){
 
   const t = elapsed;
   const wave = currentWave();
-  const hpScale = (1 + t/70) * waveHpMult(wave);
+  // additive (not multiplicative) scaling — two compounding growth factors made bosses
+  // explode into the thousands of HP within the first couple of waves
+  const hpScale = 1 + t/220 + (wave-1)*0.45;
+  const dmgScale = 1 + t/260 + (wave-1)*0.28;
+  const bossHp = Math.round(420*hpScale);
   creeps.push({
     id: uid(), x, y,
     radius: 44,
-    hp: 420*hpScale, maxHp: 420*hpScale,
-    dmg: 24*(1+t/110)*waveDmgMult(wave),
+    hp: bossHp, maxHp: bossHp,
+    dmg: Math.round(24*dmgScale),
     speed: rand(55,72)*waveSpeedMult(wave),
     expValue: 140,
     boss: true, brute:false,
@@ -1027,8 +1092,10 @@ function updateBossSpawning(dt){
 }
 
 function updateCreeps(dt){
+  const now0 = performance.now();
   for(const c of creeps){
     if(c.hp<=0) continue;
+    if(c.knockUntil && now0 < c.knockUntil) continue; // reeling from a knockback — AI stands down briefly
 
     if(c.swordsman){
       c.spinAngle = (c.spinAngle||0) + creepSpinSpeed(c)*dt;
@@ -1298,7 +1365,7 @@ function connectMultiplayer(){
   });
 
   channel.on("broadcast", {event:"hit"}, ({payload})=>{
-    if(payload.targetId !== myId) return;
+    if(payload.targetId !== myId || !pvpMode) return; // co-op players never take PvP damage, even if an attacker's client is stale
     tryDamagePlayer(player, payload.dmg, null);
   });
 
@@ -1341,6 +1408,7 @@ function broadcastState(){
     swordCount: player.swords.length,
     spinAngle: player.spinAngle,
     orbitR: orbitRadius(player),
+    pvp: pvpMode,
   }});
 }
 
@@ -1352,7 +1420,7 @@ function pruneRemotePlayers(){
 }
 
 function checkPvpHits(){
-  if(!channel) return;
+  if(!channel || !pvpMode) return; // peaceful ("Berteman") players never throw PvP damage
   const R = orbitRadius(player);
   const now = performance.now();
   for(let i=0;i<player.swords.length;i++){
@@ -1362,6 +1430,7 @@ function checkPvpHits(){
     const x2 = player.x + Math.cos(angle)*(R+SWORD_VISUAL_LEN*0.6);
     const y2 = player.y + Math.sin(angle)*(R+SWORD_VISUAL_LEN*0.6);
     for(const [id, rp] of remotePlayers){
+      if(rp.pvp === false) continue; // respect the other player's "Berteman" choice
       const dd = pointSegDist(rp.x,rp.y,x1,y1,x2,y2);
       if(dd < BLADE_HALF_WIDTH+16){
         rp._hitTimers = rp._hitTimers || {};
@@ -1742,11 +1811,11 @@ function updateHUD(){
   if(mode==="multiplayer"){
     const rosterBox = document.getElementById("roster");
     rosterBox.classList.remove("hidden");
-    const list = [{name:playerName+" (kamu)", level:player.level}];
-    for(const [id,rp] of remotePlayers) list.push({name:rp.name||"?", level:rp.level||1});
+    const list = [{name:playerName+" (kamu)", level:player.level, pvp:pvpMode}];
+    for(const [id,rp] of remotePlayers) list.push({name:rp.name||"?", level:rp.level||1, pvp: rp.pvp!==false});
     list.sort((a,b)=>b.level-a.level);
     document.getElementById("rosterList").innerHTML = list.slice(0,8).map(r=>
-      `<div class="roster-row"><span>${escapeHtml(r.name)}</span><span>Lv${r.level}</span></div>`
+      `<div class="roster-row"><span>${r.pvp?"⚔":"🤝"} ${escapeHtml(r.name)}</span><span>Lv${r.level}</span></div>`
     ).join("");
   } else {
     document.getElementById("roster").classList.add("hidden");
@@ -1762,7 +1831,9 @@ function updateBossBarUI(){
   const boss = creeps.find(c=>c.boss && c.hp>0);
   if(!boss){ box.classList.add("hidden"); return; }
   box.classList.remove("hidden");
-  document.getElementById("bossName").textContent = boss.name+" — "+Math.max(0,Math.ceil(boss.hp))+" / "+boss.maxHp;
+  const shownMax = Math.round(boss.maxHp);
+  const shownHp = Math.min(shownMax, Math.max(0, Math.round(boss.hp)));
+  document.getElementById("bossName").textContent = boss.name+" — "+shownHp+" / "+shownMax;
   document.getElementById("bossbar-fill").style.width = clamp(boss.hp/boss.maxHp,0,1)*100+"%";
 }
 
@@ -1932,46 +2003,65 @@ document.getElementById("btnConfirmExit").addEventListener("click", async (e)=>{
   exitToMenu();
 });
 
-/* ================= GALLERY ================= */
-function renderGallery(tab){
-  const body = document.getElementById("galleryBody");
-  if(tab==="swords"){
-    body.innerHTML = SWORD_TIERS.map(t=>`
-      <div class="gitem" style="border-left-color:${t.color}">
-        <div class="gitem-icon" style="color:${t.color}">⚔</div>
-        <div class="gitem-body">
-          <h4 style="color:${t.color}">${t.label}</h4>
-          <div class="meta">Damage dasar: ${t.dmg}${t.lifesteal? " · Lifesteal "+Math.round(t.lifesteal*100)+"%" : ""}</div>
-          <p>${t.desc}</p>
-        </div>
-      </div>`).join("");
-  } else {
-    body.innerHTML = `<div style="font-size:12px; color:var(--text-dim); margin-bottom:10px;">
-      Kamu punya 3 slot skill. Skill cuma didapat dari orb yang muncul di field (dan cuma berlaku selama game berjalan). Skill bersifat <b>pasif</b> — begitu didapat, otomatis aktif sendiri sesuai cooldown-nya, nggak perlu ditekan. Nemu skill yang sama lagi = level naik & efeknya makin kuat. Icon di kanan bawah cuma nunjukin skill apa yang kamu punya & sisa cooldown-nya.
-    </div>` + SKILLS.map(s=>`
-      <div class="gitem" style="border-left-color:${s.color}">
-        <div class="gitem-icon" style="color:${s.color}">${s.icon}</div>
-        <div class="gitem-body">
-          <h4 style="color:${s.color}">${s.label}</h4>
-          <div class="meta">Cooldown: ${(s.cooldown/1000).toFixed(0)}s</div>
-          <p>${s.desc}</p>
-        </div>
-      </div>`).join("");
-  }
+/* ================= MENU GALLERIES (always visible on the main menu now) ================= */
+const ENEMY_INFO = [
+  { key:"normal", label:"Creep", color:"#8a93b3", icon:"◆",
+    desc:"Musuh dasar yang ngejar dan nabrak kamu. Gampang dikalahin, kadang drop pedang." },
+  { key:"brute", label:"Brute", color:"#ff6b6b", icon:"●",
+    desc:"HP lebih tebal dan pukulannya sakit. Hampir selalu drop pedang bagus kalau berhasil dikalahin." },
+  { key:"swordsman", label:"Musuh Bersenjata", color:"#c58bff", icon:"⚔️",
+    desc:"Punya blade sendiri yang ikut muter. Bisa ambil pedang di field buat naikin kekuatan, dan bisa beradu blade — yang lebih lemah bakal pecah." },
+  { key:"boss", label:"Boss", color:"#ff2d4d", icon:"💀",
+    desc:"Muncul tiap gelombang (3 menit sekali). HP dan damage-nya besar, tapi selalu drop Blade Pack + pedang bagus kalau dikalahin." },
+];
+function renderEnemyGallery(){
+  document.getElementById("enemyGallery").innerHTML = ENEMY_INFO.map(e=>`
+    <div class="gitem" style="border-left-color:${e.color}">
+      <div class="gitem-icon" style="color:${e.color}">${e.icon}</div>
+      <div class="gitem-body">
+        <h4 style="color:${e.color}">${e.label}</h4>
+        <p>${e.desc}</p>
+      </div>
+    </div>`).join("");
 }
-document.getElementById("btnGallery").addEventListener("click", ()=>{
-  document.getElementById("galleryModal").classList.remove("hidden");
-  renderGallery("swords");
+function renderSwordGallery(){
+  document.getElementById("swordGallery").innerHTML = SWORD_TIERS.map(t=>`
+    <div class="gitem" style="border-left-color:${t.color}">
+      <div class="gitem-icon" style="color:${t.color}">⚔️</div>
+      <div class="gitem-body">
+        <h4 style="color:${t.color}">${t.label}</h4>
+        <div class="meta">Damage dasar: ${t.dmg}${t.lifesteal? " · Lifesteal "+Math.round(t.lifesteal*100)+"%" : ""}</div>
+        <p>${t.desc}</p>
+      </div>
+    </div>`).join("");
+}
+function renderSkillGallery(){
+  document.getElementById("skillGallery").innerHTML = `<div style="font-size:11px; color:var(--text-dim); margin-bottom:8px; line-height:1.4;">
+      3 slot skill, didapat dari orb di field, cuma berlaku selama game jalan. Semua skill <b>pasif</b> — otomatis aktif sendiri tiap cooldown, nggak perlu ditekan.
+    </div>` + SKILLS.map(s=>`
+    <div class="gitem" style="border-left-color:${s.color}">
+      <div class="gitem-icon" style="color:${s.color}">${s.icon}</div>
+      <div class="gitem-body">
+        <h4 style="color:${s.color}">${s.label}</h4>
+        <div class="meta">Cooldown: ${(s.cooldown/1000).toFixed(0)}s</div>
+        <p>${s.desc}</p>
+      </div>
+    </div>`).join("");
+}
+renderEnemyGallery();
+renderSwordGallery();
+renderSkillGallery();
+
+/* ================= MULTIPLAYER MODE TOGGLE ================= */
+document.getElementById("btnModeVersus").addEventListener("click", ()=>{
+  pvpMode = true;
+  document.getElementById("btnModeVersus").classList.add("active");
+  document.getElementById("btnModeCoop").classList.remove("active");
 });
-document.getElementById("btnCloseGallery").addEventListener("click", ()=>{
-  document.getElementById("galleryModal").classList.add("hidden");
-});
-document.querySelectorAll(".gtab").forEach(tabEl=>{
-  tabEl.addEventListener("click", ()=>{
-    document.querySelectorAll(".gtab").forEach(t=>t.classList.remove("active"));
-    tabEl.classList.add("active");
-    renderGallery(tabEl.dataset.tab);
-  });
+document.getElementById("btnModeCoop").addEventListener("click", ()=>{
+  pvpMode = false;
+  document.getElementById("btnModeCoop").classList.add("active");
+  document.getElementById("btnModeVersus").classList.remove("active");
 });
 
 document.getElementById("btnSurvival").addEventListener("click", ()=>startGame("survival"));
