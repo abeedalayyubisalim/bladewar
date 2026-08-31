@@ -101,11 +101,15 @@
   .xp-bar-fill{ height:100%; background:linear-gradient(135deg, #7db8ff, #4d7dff); border-radius:6px; transition:width .3s ease; }
   .badge-grid{ display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
   .badge{
-    width:40px; height:40px; border-radius:10px; display:flex; align-items:center; justify-content:center;
-    font-size:19px; background:#171a2b; border:1px solid #262b45; cursor:default;
+    position:relative; width:40px; height:40px; border-radius:10px; display:flex; align-items:center; justify-content:center;
+    font-size:19px; background:#171a2b; border:1px solid #262b45; cursor:pointer;
   }
-  .badge.locked{ opacity:.28; filter:grayscale(1); }
+  .badge.locked{ opacity:.28; filter:grayscale(1); cursor:pointer; }
   .badge.unlocked{ background:linear-gradient(135deg, rgba(255,91,91,0.22), rgba(255,169,77,0.22)); border-color:var(--accent-2); }
+  .badge-tier{
+    position:absolute; bottom:-5px; right:-5px; background:var(--accent-2); color:#0b0d14;
+    font-size:10px; font-weight:800; border-radius:8px; padding:1px 4px; line-height:1.3; min-width:12px; text-align:center;
+  }
   .room-row{
     display:flex; justify-content:space-between; align-items:center; font-size:13px; padding:10px 12px;
     margin-bottom:8px; border-radius:10px; background:#171a2b; border:1px solid #262b45; cursor:pointer;
@@ -289,6 +293,17 @@
   .exit-card{ background:var(--panel); border:1px solid #2b3050; border-radius:16px; padding:26px 28px; width:min(340px,90vw); text-align:center; }
   .exit-card h3{ margin:0 0 8px; font-size:18px; }
   .exit-card p{ margin:0 0 6px; font-size:13px; color:var(--text-dim); line-height:1.4; }
+
+  /* ---------- Achievement detail popup ---------- */
+  #achievementModal{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    background: rgba(5,6,10,0.85); z-index:32;
+  }
+  .ach-tier-row{
+    display:flex; justify-content:space-between; align-items:center; font-size:13px; padding:8px 10px;
+    border-radius:8px; margin-bottom:6px; background:#171a2b; border:1px solid #262b45; color:var(--text-dim);
+  }
+  .ach-tier-row.done{ border-color:var(--accent-2); background:#1d2138; color:var(--text); font-weight:700; }
 </style>
 </head>
 <body>
@@ -518,6 +533,16 @@
     <div id="roomSummaryBosses" style="margin:12px 0; font-size:13px; line-height:1.5;"></div>
     <div id="roomSummaryPlayers" style="max-height:240px; overflow-y:auto; margin:0 0 14px;"></div>
     <button class="btn btn-secondary" id="btnCloseRoomSummary">Kembali ke Menu</button>
+  </div>
+</div>
+
+<div id="achievementModal" class="hidden">
+  <div class="exit-card" style="max-width:380px;">
+    <div id="achModalIcon" style="font-size:38px; margin-bottom:4px;">🏆</div>
+    <h3 id="achModalName">Achievement</h3>
+    <p id="achModalDesc">Deskripsi.</p>
+    <div id="achModalTiers" style="margin:14px 0; text-align:left;"></div>
+    <button class="btn btn-secondary" id="btnCloseAchModal">Tutup</button>
   </div>
 </div>
 
@@ -871,6 +896,7 @@ function newPlayer(){
     lastHitAt: -9999,
     radius: 18,
     dead: false,
+    curseUntil: 0, // boss "curse" passive: while performance.now() < this, movement speed is debuffed
   };
 }
 
@@ -1329,11 +1355,17 @@ const BOSS_PASSIVES = [
   { key:"nova", label:"Gelombang Kejut", icon:"💥", desc:"Berkala melepas gelombang kejut yang melukai & mendorong siapapun di dekatnya." },
   { key:"summon", label:"Panggilan", icon:"👹", desc:"Berkala memanggil creep tambahan buat ngeroyok kamu." },
   { key:"shield", label:"Perisai", icon:"🛡️", desc:"Sesekali memasang perisai yang menolak semua damage sesaat." },
+  { key:"teleport", label:"Teleportasi", icon:"🌀", desc:"Berkala menghilang dan muncul lagi mendadak di dekatmu." },
+  { key:"vampire", label:"Vampir", icon:"🧛", desc:"Menyerap sebagian damage yang dia kasih ke kamu jadi HP buat dirinya sendiri." },
+  { key:"curse", label:"Kutukan", icon:"🌑", desc:"Berkala mengutuk kamu, bikin gerakanmu melambat sesaat." },
 ];
 const BOSS_NOVA_INTERVAL = 6000, BOSS_NOVA_RADIUS = 220, BOSS_NOVA_KNOCK = 190;
 const BOSS_SUMMON_INTERVAL = 13000;
 const BOSS_SHIELD_INTERVAL = 16000, BOSS_SHIELD_DURATION = 2200;
 const BOSS_REGEN_IDLE = 4000, BOSS_REGEN_RATE = 0.02; // fraction of maxHp per second, once idle long enough
+const BOSS_TELEPORT_INTERVAL = 9000, BOSS_TELEPORT_MIN_DIST = 140, BOSS_TELEPORT_MAX_DIST = 240;
+const BOSS_VAMPIRE_LIFESTEAL = 0.5; // fraction of damage dealt to the player that heals the boss
+const BOSS_CURSE_INTERVAL = 11000, BOSS_CURSE_RADIUS = 320, BOSS_CURSE_DURATION = 2600, BOSS_CURSE_SPEED_MULT = 0.55;
 
 function updateBossSpawning(dt){
   // boss spawning is host-authoritative in multiplayer, so both players only ever fight ONE shared
@@ -1401,6 +1433,36 @@ function updateBossPassives(dt){
     if(c.passive === "regen" && (mode!=="multiplayer" || isHost()) && !c.netBoss){
       if(now - (c.lastHitAt||0) > BOSS_REGEN_IDLE && c.hp < c.maxHp){
         c.hp = Math.min(c.maxHp, c.hp + c.maxHp*BOSS_REGEN_RATE*dt);
+      }
+    }
+
+    // teleport: blinks to a random spot just outside melee range of the player — position is authoritative
+    // on host/survival same as summon/regen; followers just see it slide there fast via the usual net interp
+    if(c.passive === "teleport" && (mode!=="multiplayer" || isHost()) && !c.netBoss){
+      const cyc = since % BOSS_TELEPORT_INTERVAL;
+      if(cyc < 120 && now-(c._lastTeleportTrigger||0) > 1000){
+        c._lastTeleportTrigger = now;
+        novaEffects.push({ x:c.x, y:c.y, radius:10, maxRadius:70, life:0.3, maxLife:0.3, color:"#a35bff" });
+        const ang = rand(0,Math.PI*2);
+        const dist = rand(BOSS_TELEPORT_MIN_DIST, BOSS_TELEPORT_MAX_DIST);
+        c.x = clamp(player.x+Math.cos(ang)*dist, c.radius, world.w-c.radius);
+        c.y = clamp(player.y+Math.sin(ang)*dist, c.radius, world.h-c.radius);
+        novaEffects.push({ x:c.x, y:c.y, radius:10, maxRadius:70, life:0.3, maxLife:0.3, color:"#a35bff" });
+        playKnockback();
+      }
+    }
+
+    // curse: a ranged debuff (unlike nova/shield, it doesn't need contact) — every client that's close
+    // enough applies it to its own local player independently, deterministic from spawnedAt like enrage
+    if(c.passive === "curse"){
+      const cyc = since % BOSS_CURSE_INTERVAL;
+      if(cyc < 120 && now-(c._lastCurseTrigger||0) > 1000){
+        c._lastCurseTrigger = now;
+        if(Math.hypot(player.x-c.x, player.y-c.y) < BOSS_CURSE_RADIUS){
+          player.curseUntil = now + BOSS_CURSE_DURATION;
+          spawnFloater(player.x, player.y-player.radius-20, "Terkutuk!", "#c77dff");
+          showBanner("🌑 "+c.name+" mengutukmu!");
+        }
       }
     }
   }
@@ -1594,7 +1656,11 @@ function updateCreeps(dt){
 
     // contact damage to player
     if(d < c.radius + player.radius){
-      tryDamagePlayer(player, c.boss ? c.dmg*(c._enrageDmgMult||1) : c.dmg, c);
+      const dmgDealt = c.boss ? c.dmg*(c._enrageDmgMult||1) : c.dmg;
+      const landed = tryDamagePlayer(player, dmgDealt, c);
+      if(landed && c.boss && c.passive==="vampire"){
+        c.hp = Math.min(c.maxHp, c.hp + dmgDealt*BOSS_VAMPIRE_LIFESTEAL);
+      }
     }
   }
   // light mutual separation so creeps don't stack exactly on top of each other
@@ -1780,7 +1846,7 @@ function weightedBruteTier(){
 
 function tryDamagePlayer(p, dmg, source){
   const now = performance.now();
-  if(now - p.lastHitAt < PLAYER_IFRAME) return;
+  if(now - p.lastHitAt < PLAYER_IFRAME) return false; // blocked by i-frames — no damage actually landed
   p.lastHitAt = now;
   p.hp -= dmg;
   spawnFloater(p.x, p.y-p.radius-6, "-"+Math.round(dmg), "#ff5b5b");
@@ -1789,6 +1855,7 @@ function tryDamagePlayer(p, dmg, source){
     p.dead = true;
     onPlayerDeath();
   }
+  return true; // damage actually landed — callers (e.g. the "vampire" boss passive) can react to this
 }
 
 /* ---------- Pickups ---------- */
@@ -2236,8 +2303,9 @@ function updatePlayerMovement(dt){
   if(len>0){ dx/=len; dy/=len; }
   else if(joy.active){ dx = joy.dx; dy = joy.dy; }
 
-  player.x = clamp(player.x + dx*player.speed*dt, player.radius, world.w-player.radius);
-  player.y = clamp(player.y + dy*player.speed*dt, player.radius, world.h-player.radius);
+  const curseMult = (player.curseUntil && performance.now() < player.curseUntil) ? BOSS_CURSE_SPEED_MULT : 1;
+  player.x = clamp(player.x + dx*player.speed*curseMult*dt, player.radius, world.w-player.radius);
+  player.y = clamp(player.y + dy*player.speed*curseMult*dt, player.radius, world.h-player.radius);
   if(dx||dy) player.facing = Math.atan2(dy,dx);
 }
 
@@ -2969,20 +3037,47 @@ const ACCOUNT_XP_PER_LEVEL = 300;
 function accountLevelFromXp(xp){ return Math.floor(Math.max(0,xp||0) / ACCOUNT_XP_PER_LEVEL) + 1; }
 function accountXpIntoLevel(xp){ return Math.max(0,xp||0) % ACCOUNT_XP_PER_LEVEL; }
 
-let accountStats = { total_points:0, total_matches:0, total_kills:0, total_boss_kills:0, best_time_survived:0, best_level:1 };
+const DEFAULT_ACCOUNT_STATS = { total_points:0, total_matches:0, total_kills:0, total_boss_kills:0, best_time_survived:0, best_level:1, best_kills:0, best_boss_kills:0 };
+let accountStats = { ...DEFAULT_ACCOUNT_STATS };
 
-const ACHIEVEMENTS = [
+// Achievement yang cuma "kebuka / belum" sekali, nggak bertingkat.
+const SIMPLE_ACHIEVEMENTS = [
   { key:"first_blood", icon:"🩸", name:"Darah Pertama", desc:"Dapatkan kill pertamamu.", check: s => s.total_kills >= 1 },
-  { key:"warrior", icon:"⚔️", name:"Petarung", desc:"Kumpulkan 50 total kill.", check: s => s.total_kills >= 50 },
-  { key:"exterminator", icon:"💀", name:"Pembasmi", desc:"Kumpulkan 250 total kill.", check: s => s.total_kills >= 250 },
-  { key:"survivor", icon:"⏱️", name:"Penyintas", desc:"Bertahan 5 menit dalam satu pertandingan.", check: s => s.best_time_survived >= 300 },
-  { key:"legend_survivor", icon:"🏆", name:"Legenda Bertahan", desc:"Bertahan 15 menit dalam satu pertandingan.", check: s => s.best_time_survived >= 900 },
-  { key:"boss_slayer", icon:"👑", name:"Pembunuh Boss", desc:"Kalahkan boss pertamamu.", check: s => s.total_boss_kills >= 1 },
-  { key:"boss_hunter", icon:"🔥", name:"Boss Hunter", desc:"Kalahkan 10 boss.", check: s => s.total_boss_kills >= 10 },
-  { key:"high_level", icon:"⭐", name:"Naik Level", desc:"Capai level 10 dalam satu pertandingan.", check: s => s.best_level >= 10 },
-  { key:"loyal", icon:"🎮", name:"Pemain Setia", desc:"Mainkan 20 pertandingan.", check: s => s.total_matches >= 20 },
   { key:"account_10", icon:"🥇", name:"Naik Pangkat", desc:"Capai Level Akun 10.", check: s => accountLevelFromXp(s.total_points) >= 10 },
 ];
+
+// Achievement BERTINGKAT (5 level tiap kategori) — klik badge-nya buat lihat rincian tiap levelnya.
+// Semua "best_*" itu rekor DALAM SATU PERTANDINGAN (bukan akumulasi semua pertandingan), kecuali
+// match_count yang memang total keseluruhan pertandingan yang pernah dimainkan.
+const TIERED_ACHIEVEMENTS = [
+  { key:"kills_match", icon:"⚔️", name:"Pembantai", desc:"Kill terbanyak dalam SATU pertandingan.",
+    statKey:"best_kills", unit:"kill", tiers:[100,500,1000,5000,10000] },
+  { key:"survive_time", icon:"⏱️", name:"Penyintas", desc:"Lama bertahan dalam SATU pertandingan.",
+    statKey:"best_time_survived", unit:"menit", isTime:true, tiers:[300,900,1800,2700,3600] },
+  { key:"boss_match", icon:"👑", name:"Pembunuh Boss", desc:"Boss yang dikalahkan dalam SATU pertandingan.",
+    statKey:"best_boss_kills", unit:"boss", tiers:[5,15,30,45,60] },
+  { key:"char_level", icon:"⭐", name:"Naik Level", desc:"Level karakter tertinggi dalam SATU pertandingan.",
+    statKey:"best_level", unit:"level", tiers:[10,50,100,500,1000] },
+  { key:"match_count", icon:"🎮", name:"Pemain Setia", desc:"Total semua pertandingan yang sudah kamu mainkan.",
+    statKey:"total_matches", unit:"match", tiers:[25,75,200,500,1000] },
+  { key:"wave_match", icon:"🌊", name:"Gelombang", desc:"Gelombang tertinggi yang pernah kamu capai dalam SATU pertandingan.",
+    statKey:"best_wave", unit:"wave", tiers:[5,15,30,45,60] }, // best_wave dihitung dari best_time_survived, lihat di bawah
+];
+
+// "wave" itu murni turunan dari waktu (lihat currentWave()/WAVE_INTERVAL) — jadi gelombang tertinggi
+// yang pernah dicapai = dihitung dari rekor waktu bertahan terlama, nggak perlu kolom DB terpisah.
+function tieredAchievementValue(a, s){
+  if(a.statKey==="best_wave") return Math.floor((s.best_time_survived||0)/WAVE_INTERVAL)+1;
+  return s[a.statKey]||0;
+}
+function tieredAchievementTier(a, s){
+  const v = tieredAchievementValue(a, s);
+  let tier = 0;
+  for(let i=0;i<a.tiers.length;i++){ if(v >= a.tiers[i]) tier = i+1; }
+  return tier;
+}
+function fmtAchThreshold(a, val){ return a.isTime? Math.round(val/60)+" menit" : val+" "+a.unit; }
+function fmtAchCurrentValue(a, val){ return a.isTime? Math.floor(val/60)+" menit" : Math.floor(val)+" "+a.unit; }
 
 function renderAccountProgress(){
   const lvl = accountLevelFromXp(accountStats.total_points);
@@ -2994,26 +3089,56 @@ function renderAccountProgress(){
   if(xpEl) xpEl.textContent = into+" / "+ACCOUNT_XP_PER_LEVEL+" XP";
   if(fillEl) fillEl.style.width = Math.round((into/ACCOUNT_XP_PER_LEVEL)*100)+"%";
   const grid = document.getElementById("badgeGrid");
-  if(grid){
-    grid.innerHTML = ACHIEVEMENTS.map(a=>{
-      const unlocked = a.check(accountStats);
-      return `<div class="badge ${unlocked?"unlocked":"locked"}" title="${escapeHtml(a.name)} — ${escapeHtml(a.desc)}">${a.icon}</div>`;
-    }).join("");
-  }
+  if(!grid) return;
+  const items = [
+    ...SIMPLE_ACHIEVEMENTS.map(a=>({ kind:"simple", def:a, unlocked: a.check(accountStats) })),
+    ...TIERED_ACHIEVEMENTS.map(a=>{
+      const tier = tieredAchievementTier(a, accountStats);
+      return { kind:"tiered", def:a, unlocked: tier>0, tier };
+    }),
+  ];
+  grid.innerHTML = items.map((it,i)=>{
+    const tierTag = (it.kind==="tiered" && it.tier>0) ? `<span class="badge-tier">${it.tier}</span>` : "";
+    return `<div class="badge ${it.unlocked?"unlocked":"locked"}" data-ach-idx="${i}" title="${escapeHtml(it.def.name)}">${it.def.icon}${tierTag}</div>`;
+  }).join("");
+  grid.querySelectorAll(".badge").forEach((el,i)=>{
+    el.addEventListener("click", ()=>showAchievementModal(items[i]));
+  });
 }
+
+function showAchievementModal(item){
+  const a = item.def;
+  document.getElementById("achModalIcon").textContent = a.icon;
+  document.getElementById("achModalName").textContent = a.name;
+  document.getElementById("achModalDesc").textContent = a.desc;
+  const box = document.getElementById("achModalTiers");
+  if(item.kind==="simple"){
+    box.innerHTML = `<div class="ach-tier-row ${item.unlocked?"done":""}"><span>${item.unlocked? "✓ Sudah didapat" : "Belum didapat"}</span></div>`;
+  } else {
+    const val = tieredAchievementValue(a, accountStats);
+    box.innerHTML = a.tiers.map((t,i)=>{
+      const done = val >= t;
+      return `<div class="ach-tier-row ${done?"done":""}"><span>Level ${i+1}</span><span>${done?"✓ ":""}${fmtAchThreshold(a,t)}</span></div>`;
+    }).join("") + `<div style="font-size:11px;color:var(--text-dim);margin-top:8px;">Rekor kamu sekarang: ${fmtAchCurrentValue(a,val)}</div>`;
+  }
+  document.getElementById("achievementModal").classList.remove("hidden");
+}
+document.getElementById("btnCloseAchModal").addEventListener("click", ()=>{
+  document.getElementById("achievementModal").classList.add("hidden");
+});
 
 async function loadAccountProgress(){
   if(!sb){ renderAccountProgress(); return; }
   try{
     const { data, error } = await sb.from("player_stats_bladewar")
-      .select("total_points,total_matches,total_kills,total_boss_kills,best_time_survived,best_level")
+      .select("total_points,total_matches,total_kills,total_boss_kills,best_time_survived,best_level,best_kills,best_boss_kills")
       .eq("player_id", myPlayerId)
       .maybeSingle();
     if(error) throw error;
-    accountStats = data || { total_points:0, total_matches:0, total_kills:0, total_boss_kills:0, best_time_survived:0, best_level:1 };
+    accountStats = data || { ...DEFAULT_ACCOUNT_STATS };
   }catch(e){
     console.warn("account progress load failed (jalanin bladewar_setup_v2.sql kalau tabel belum ada)", e);
-    accountStats = { total_points:0, total_matches:0, total_kills:0, total_boss_kills:0, best_time_survived:0, best_level:1 };
+    accountStats = { ...DEFAULT_ACCOUNT_STATS };
   }
   renderAccountProgress();
   if(lobbyChannel) lobbyChannel.track({ name: playerName, level: accountLevelFromXp(accountStats.total_points) });
