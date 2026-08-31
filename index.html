@@ -227,6 +227,7 @@ const SWORD_TIERS = [
   { key:"legendary", label:"Legendary", color:"#ffa94d", dmg:20, weight:3  },
 ];
 const MAX_SWORDS = 10;
+const GROW_UNTIL = 6; // freely add swords until this many; after that, only upgrade if stronger than your weakest
 const HIT_COOLDOWN = 260; // ms, per sword-vs-target
 const PLAYER_IFRAME = 500; // ms invulnerability after hit
 const BASE_ORBIT_RADIUS = 46;
@@ -264,6 +265,45 @@ function colorForId(id){
   let h=0; for(let i=0;i<id.length;i++) h = (h*31 + id.charCodeAt(i))>>>0;
   return `hsl(${h%360} 70% 60%)`;
 }
+
+/* ================= AUDIO (procedural, no external files needed) ================= */
+let actx = null;
+function ensureAudio(){
+  try{
+    if(!actx) actx = new (window.AudioContext||window.webkitAudioContext)();
+    if(actx.state === "suspended") actx.resume();
+  }catch(e){ /* audio not available, game still works */ }
+}
+function playTone(freq, duration, type, gainStart, glideTo){
+  if(!actx) return;
+  try{
+    const t0 = actx.currentTime;
+    const osc = actx.createOscillator();
+    const gain = actx.createGain();
+    osc.type = type || "sine";
+    osc.frequency.setValueAtTime(freq, t0);
+    if(glideTo) osc.frequency.exponentialRampToValueAtTime(Math.max(1,glideTo), t0+duration);
+    gain.gain.setValueAtTime(gainStart||0.15, t0);
+    gain.gain.exponentialRampToValueAtTime(0.001, t0+duration);
+    osc.connect(gain); gain.connect(actx.destination);
+    osc.start(t0); osc.stop(t0+duration);
+  }catch(e){}
+}
+let lastClangAt = 0;
+function playClang(){
+  const now = performance.now();
+  if(now - lastClangAt < 70) return; // throttle so many simultaneous hits don't distort
+  lastClangAt = now;
+  playTone(rand(650,950), 0.07, "square", 0.10);
+  playTone(rand(1500,2000), 0.05, "triangle", 0.05);
+}
+function playPickup(){ playTone(520, 0.09, "sine", 0.12, 1000); }
+function playLevelUp(){
+  playTone(520, 0.14, "sine", 0.15, 900);
+  setTimeout(()=>playTone(780, 0.2, "sine", 0.15, 1300), 90);
+}
+function playHurt(){ playTone(160, 0.15, "sawtooth", 0.14, 70); }
+function playDeath(){ playTone(320, 0.6, "sawtooth", 0.18, 50); }
 
 /* ================= CANVAS ================= */
 const canvas = document.getElementById("game");
@@ -320,6 +360,17 @@ let playerName = "Player";
 let myId = uid();
 let myColor = colorForId(myId);
 
+function getPersistentPlayerId(){
+  try{
+    let id = localStorage.getItem("bladewar_player_id");
+    if(!id){ id = uid(); localStorage.setItem("bladewar_player_id", id); }
+    return id;
+  }catch(e){
+    return "session-"+myId; // localStorage unavailable (e.g. private mode) — falls back to per-session id
+  }
+}
+const myPlayerId = getPersistentPlayerId();
+
 let player = null;
 let creeps = [];
 let pickups = [];
@@ -355,18 +406,25 @@ function orbitRadius(p){ return BASE_ORBIT_RADIUS + (p.swords.length-1)*ORBIT_RA
 function spinSpeed(p){ return BASE_SPIN_SPEED + p.level*SPIN_SPEED_PER_LEVEL; }
 
 function addSword(p, tier){
+  // early game: freely grow the number of orbiting swords (the "gasing" fantasy)
+  if(p.swords.length < GROW_UNTIL){
+    p.swords.push({ ...tier });
+    return true;
+  }
+  // later: prioritize quality — a more powerful sword replaces your weakest one
+  let weakestIdx = 0;
+  for(let i=1;i<p.swords.length;i++) if(p.swords[i].dmg < p.swords[weakestIdx].dmg) weakestIdx = i;
+  if(tier.dmg > p.swords[weakestIdx].dmg){
+    const old = p.swords[weakestIdx];
+    p.swords[weakestIdx] = { ...tier };
+    return { upgraded:true, from:old, to:tier };
+  }
   if(p.swords.length < MAX_SWORDS){
     p.swords.push({ ...tier });
-  } else {
-    // replace weakest if new tier stronger, else small global buff
-    let weakestIdx = 0;
-    for(let i=1;i<p.swords.length;i++) if(p.swords[i].dmg < p.swords[weakestIdx].dmg) weakestIdx = i;
-    if(tier.dmg > p.swords[weakestIdx].dmg){
-      p.swords[weakestIdx] = { ...tier };
-    } else {
-      p.bonusDmgMult += 0.02;
-    }
+    return true;
   }
+  p.bonusDmgMult += 0.02;
+  return false;
 }
 
 function gainExp(p, amount, x, y){
@@ -379,6 +437,7 @@ function gainExp(p, amount, x, y){
     p.maxHp += 10;
     p.hp = Math.min(p.maxHp, p.hp + p.maxHp*0.3);
     showBanner("LEVEL UP! Lv "+p.level);
+    playLevelUp();
     needed = expForLevel(p.level);
   }
 }
@@ -490,6 +549,7 @@ function trySwordHits(p, targetsAreCreeps){
             const dmg = swords[i].dmg * p.bonusDmgMult;
             c.hp -= dmg;
             spawnFloater(c.x, c.y-c.radius, "-"+Math.round(dmg), "#ffd43b");
+            playClang();
             if(c.hp<=0){ killCreep(c); }
           }
         }
@@ -520,6 +580,7 @@ function tryDamagePlayer(p, dmg, source){
   p.lastHitAt = now;
   p.hp -= dmg;
   spawnFloater(p.x, p.y-p.radius-6, "-"+Math.round(dmg), "#ff5b5b");
+  playHurt();
   if(p.hp<=0 && !p.dead){
     p.dead = true;
     onPlayerDeath();
@@ -546,8 +607,13 @@ function updatePickups(){
   for(let i=pickups.length-1;i>=0;i--){
     const pu = pickups[i];
     if(dist2(pu.x,pu.y,player.x,player.y) < (player.radius+14)*(player.radius+14)){
-      addSword(player, pu.tier);
-      spawnFloater(pu.x,pu.y,"+"+pu.tier.label,pu.tier.color);
+      const result = addSword(player, pu.tier);
+      if(result && result.upgraded){
+        spawnFloater(pu.x,pu.y,"Upgrade! "+pu.tier.label,pu.tier.color);
+      } else {
+        spawnFloater(pu.x,pu.y,"+"+pu.tier.label,pu.tier.color);
+      }
+      playPickup();
       pickups.splice(i,1);
     }
   }
@@ -638,6 +704,7 @@ function checkPvpHits(){
           const dmg = player.swords[i].dmg * player.bonusDmgMult;
           channel.send({type:"broadcast", event:"hit", payload:{ targetId:id, dmg, fromId: myId }});
           spawnFloater(rp.x, rp.y-20, "-"+Math.round(dmg), "#ffd43b");
+          playClang();
         }
       }
     }
@@ -889,6 +956,7 @@ function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<
 let resultsShown = false;
 
 function startGame(selMode){
+  ensureAudio();
   playerName = (document.getElementById("nameInput").value||"Player").trim().slice(0,14) || "Player";
   mode = selMode;
   world = selMode==="survival"? {w:4000,h:4000} : {w:2400,h:2400};
@@ -912,6 +980,7 @@ function startGame(selMode){
 function onPlayerDeath(){
   running = false;
   resultsShown = true;
+  playDeath();
   if(mode==="multiplayer" && channel){
     channel.send({type:"broadcast", event:"death", payload:{id:myId}});
   }
@@ -923,6 +992,7 @@ function onPlayerDeath(){
   document.getElementById("results").classList.remove("hidden");
   document.getElementById("hud").classList.add("hidden");
   if(mode==="multiplayer") disconnectMultiplayer();
+  if(mode==="survival") submitScore(); // auto-kirim skor, progress tertinggi per player_id yang kesimpen
 }
 
 document.getElementById("btnSurvival").addEventListener("click", ()=>startGame("survival"));
@@ -933,23 +1003,29 @@ document.getElementById("btnBackMenu").addEventListener("click", ()=>{
   document.getElementById("connstatus").classList.add("hidden");
   loadLeaderboard();
 });
-document.getElementById("btnSubmitScore").addEventListener("click", async ()=>{
+
+async function submitScore(){
   const btn = document.getElementById("btnSubmitScore");
-  btn.disabled = true; btn.textContent = "Mengirim…";
+  if(!sb){ if(btn) btn.textContent = "Gagal (no supabase)"; return; }
+  if(btn){ btn.disabled = true; btn.textContent = "Mengirim…"; }
   try{
-    if(sb){
-      await sb.from("bladewar_scores").insert({
-        name: playerName, level: player.level, time_survived: Math.floor(elapsed), kills: kills
-      });
-      btn.textContent = "Terkirim!";
-    } else {
-      btn.textContent = "Gagal (no supabase)";
-    }
+    // pakai RPC: hanya menimpa skor lama (player_id sama) kalau progress baru lebih tinggi
+    const { error } = await sb.rpc("submit_bladewar_score", {
+      p_player_id: myPlayerId,
+      p_name: playerName,
+      p_level: player.level,
+      p_time: Math.floor(elapsed),
+      p_kills: kills,
+    });
+    if(error) throw error;
+    if(btn){ btn.disabled = false; btn.textContent = "Terkirim ✓"; }
+    loadLeaderboard();
   }catch(e){
     console.warn("submit score failed", e);
-    btn.textContent = "Gagal kirim";
+    if(btn){ btn.disabled = false; btn.textContent = "Kirim Ulang"; }
   }
-});
+}
+document.getElementById("btnSubmitScore").addEventListener("click", submitScore);
 
 /* ================= LEADERBOARD ================= */
 async function loadLeaderboard(){
