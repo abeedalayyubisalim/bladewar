@@ -654,6 +654,16 @@ let lastBroadcast = 0;
 const BROADCAST_INTERVAL = 90; // ms
 let pvpMode = true; // multiplayer only: true = "Saling Lawan" (damage flows), false = "Berteman" (co-op, no PvP damage)
 
+// deterministic host election: whoever has the lexicographically smallest id, out of everyone currently
+// in the room, is the "host" — the single source of truth for shared world state (the boss, skill orb
+// spawns) so every player fights/sees the exact same thing instead of each running an independent copy.
+function currentHostId(){
+  let min = myId;
+  for(const id of remotePlayers.keys()) if(id < min) min = id;
+  return min;
+}
+function isHost(){ return mode !== "multiplayer" || currentHostId() === myId; }
+
 function newPlayer(){
   return {
     x: world.w/2, y: world.h/2, vx:0, vy:0,
@@ -756,12 +766,12 @@ function getNearbyTargets(x, y, range){
 function damageTarget(t, dmg, healOnHitPct){
   if(t.type==="creep"){
     const c = t.ref;
-    c.hp -= dmg;
-    spawnFloater(c.x, c.y-c.radius, "-"+Math.round(dmg), "#ffd43b");
-    if(healOnHitPct){
-      player.hp = Math.min(player.maxHp, player.hp + dmg*healOnHitPct);
+    if(applyDamageToCreep(c, dmg)){
+      spawnFloater(c.x, c.y-c.radius, "-"+Math.round(dmg), "#ffd43b");
+      if(healOnHitPct){
+        player.hp = Math.min(player.maxHp, player.hp + dmg*healOnHitPct);
+      }
     }
-    if(c.hp<=0) killCreep(c);
   } else if(t.type==="remote" && channel){
     channel.send({type:"broadcast", event:"hit", payload:{ targetId:t.id, dmg, fromId:myId }});
     spawnFloater(t.x, t.y-20, "-"+Math.round(dmg), "#ffd43b");
@@ -855,9 +865,9 @@ function updateSkillEffects(dt){
       const last = z.lastCreepTick[c.id] || 0;
       if(now-last >= z.tickEvery){
         z.lastCreepTick[c.id] = now;
-        c.hp -= z.tickDmg;
-        spawnFloater(c.x, c.y-c.radius, "-"+Math.round(z.tickDmg), "#7bd93a");
-        if(c.hp<=0) killCreep(c);
+        if(applyDamageToCreep(c, z.tickDmg)){
+          spawnFloater(c.x, c.y-c.radius, "-"+Math.round(z.tickDmg), "#7bd93a");
+        }
       }
     }
     if(mode==="multiplayer" && channel){
@@ -876,16 +886,23 @@ function updateSkillEffects(dt){
 
 /* ---------- Skill orb pickups (field only, session-only) ---------- */
 function spawnSkillOrbsAmbient(dt){
+  // orb spawning is host-authoritative in multiplayer so both players see the exact same orbs at the
+  // exact same spots, instead of two independently-rolled sets that never lined up (the reported "ga singkron")
+  if(mode==="multiplayer" && !isHost()) return;
   state.skillOrbTimer = (state.skillOrbTimer||rand(6,10)) - dt;
   if(state.skillOrbTimer<=0){
     state.skillOrbTimer = rand(14,22);
     if(skillOrbs.length < 6){
-      skillOrbs.push({
+      const orb = {
         x: clamp(player.x+rand(-1100,1100), 40, world.w-40),
         y: clamp(player.y+rand(-1100,1100), 40, world.h-40),
         skillKey: SKILLS[Math.floor(rand(0,SKILLS.length))].key,
         id: uid(),
-      });
+      };
+      skillOrbs.push(orb);
+      if(mode==="multiplayer" && channel){
+        channel.send({type:"broadcast", event:"orbSpawn", payload: orb});
+      }
     }
   }
 }
@@ -1068,7 +1085,8 @@ function spawnBoss(){
   const hpScale = 1 + t/220 + (wave-1)*0.45;
   const dmgScale = 1 + t/260 + (wave-1)*0.28;
   const bossHp = Math.round(420*hpScale);
-  creeps.push({
+  const passive = BOSS_PASSIVES[Math.floor(rand(0,BOSS_PASSIVES.length))].key;
+  const boss = {
     id: uid(), x, y,
     radius: 44,
     hp: bossHp, maxHp: bossHp,
@@ -1077,18 +1095,169 @@ function spawnBoss(){
     expValue: 140,
     boss: true, brute:false,
     name: BOSS_NAMES[Math.floor(rand(0,BOSS_NAMES.length))],
+    passive, spawnedAt: Date.now(), lastHitAt: performance.now(),
     hitTimers: {},
     lastTouch: -9999,
-  });
-  showBanner("⚠ "+ (creeps[creeps.length-1].name) +" MUNCUL!");
+  };
+  creeps.push(boss);
+  const pdef = BOSS_PASSIVES.find(b=>b.key===passive);
+  showBanner("⚠ "+boss.name+" MUNCUL! "+pdef.icon+" "+pdef.label);
   playBossRoar();
+  // multiplayer: the host's boss is the one authoritative copy — broadcast it so every other
+  // player spawns a matching mirror instead of rolling their own independent boss
+  if(mode==="multiplayer" && channel){
+    channel.send({type:"broadcast", event:"bossSpawn", payload:{
+      id:boss.id, x:boss.x, y:boss.y, radius:boss.radius, hp:boss.hp, maxHp:boss.maxHp,
+      dmg:boss.dmg, speed:boss.speed, expValue:boss.expValue, name:boss.name,
+      passive:boss.passive, spawnedAt:boss.spawnedAt,
+    }});
+  }
 }
 const BOSS_NAMES = ["Raja Gasing", "Momok Bilah", "Sang Penggiling", "Iblis Baja"];
+// boss passive skills: rolled randomly at spawn time so every boss fight feels a bit different and
+// tougher than a plain damage sponge. In multiplayer the host rolls the passive and broadcasts it
+// (see spawnBoss/applyNetBossState) so both players fight the exact same boss with the exact same trait.
+const BOSS_PASSIVES = [
+  { key:"regen", label:"Regenerasi", icon:"💚", desc:"Memulihkan HP sendiri kalau tidak diserang beberapa detik." },
+  { key:"enrage", label:"Amukan", icon:"🔥", desc:"Makin cepat & makin sakit pukulannya saat HP-nya menipis." },
+  { key:"nova", label:"Gelombang Kejut", icon:"💥", desc:"Berkala melepas gelombang kejut yang melukai & mendorong siapapun di dekatnya." },
+  { key:"summon", label:"Panggilan", icon:"👹", desc:"Berkala memanggil creep tambahan buat ngeroyok kamu." },
+  { key:"shield", label:"Perisai", icon:"🛡️", desc:"Sesekali memasang perisai yang menolak semua damage sesaat." },
+];
+const BOSS_NOVA_INTERVAL = 6000, BOSS_NOVA_RADIUS = 220, BOSS_NOVA_KNOCK = 190;
+const BOSS_SUMMON_INTERVAL = 13000;
+const BOSS_SHIELD_INTERVAL = 16000, BOSS_SHIELD_DURATION = 2200;
+const BOSS_REGEN_IDLE = 4000, BOSS_REGEN_RATE = 0.02; // fraction of maxHp per second, once idle long enough
+
 function updateBossSpawning(dt){
+  // boss spawning is host-authoritative in multiplayer, so both players only ever fight ONE shared
+  // boss with matching stats/passive — guests receive it via the "bossSpawn"/"state" broadcasts instead
+  if(mode==="multiplayer" && !isHost()) return;
   if(elapsed < nextBossAt) return;
-  const bossAlive = creeps.some(c=>c.boss && c.hp>0);
+  const bossAlive = creeps.some(c=>c.boss && c.hp>0 && !c.netBoss);
   if(bossAlive) return; // only one boss at a time — wait it out; nextBossAt reschedules when it dies (see killCreep)
   spawnBoss();
+}
+
+// derives each boss's passive-skill behavior every frame. hp-mutating effects (regen, summon) only run
+// on whoever owns the real hp value — the host in multiplayer, or the only client in Survival — while
+// purely cosmetic/self-damage effects (enrage's stat multipliers, the nova hitting your own local player)
+// are safe to compute on every client independently since they're deterministic from the boss's synced
+// hp/position/spawn time.
+function updateBossPassives(dt){
+  const now = performance.now();
+  for(const c of creeps){
+    if(!c.boss || c.hp<=0) continue;
+    const since = Date.now() - (c.spawnedAt||Date.now());
+    const hpFrac = clamp(c.hp/c.maxHp, 0, 1);
+
+    if(c.passive === "enrage"){
+      const t2 = hpFrac < 0.5 ? (0.5-hpFrac)*2 : 0; // 0..1 as hp goes 50%->0%
+      c._enrageDmgMult = 1 + t2*0.8;
+      c._enrageSpeedMult = 1 + t2*0.4;
+    } else {
+      c._enrageDmgMult = 1; c._enrageSpeedMult = 1;
+    }
+
+    c.shieldActive = c.passive==="shield" && (since % BOSS_SHIELD_INTERVAL) < BOSS_SHIELD_DURATION;
+
+    if(c.passive === "nova"){
+      const cyc = since % BOSS_NOVA_INTERVAL;
+      if(cyc < 120 && now-(c._lastNovaTrigger||0) > 1000){
+        c._lastNovaTrigger = now;
+        novaEffects.push({ x:c.x, y:c.y, radius:10, maxRadius:BOSS_NOVA_RADIUS, life:0.4, maxLife:0.4, color:"#ff4d4d" });
+        playKnockback();
+        const dP = Math.hypot(player.x-c.x, player.y-c.y);
+        if(dP < BOSS_NOVA_RADIUS){
+          tryDamagePlayer(player, Math.round(c.dmg*0.7), c);
+          const nx=(player.x-c.x)/(dP||1), ny=(player.y-c.y)/(dP||1);
+          player.x = clamp(player.x+nx*BOSS_NOVA_KNOCK, player.radius, world.w-player.radius);
+          player.y = clamp(player.y+ny*BOSS_NOVA_KNOCK, player.radius, world.h-player.radius);
+        }
+      }
+    }
+
+    if(c.passive === "summon" && (mode!=="multiplayer" || isHost()) && !c.netBoss){
+      const cyc = since % BOSS_SUMMON_INTERVAL;
+      if(cyc < 120 && now-(c._lastSummonTrigger||0) > 1000){
+        c._lastSummonTrigger = now;
+        const addHp = 16*(1+elapsed/45), addDmg = 6*(1+elapsed/90);
+        for(let i=0;i<2;i++){
+          const ang = rand(0,Math.PI*2);
+          creeps.push({ id:uid(), x:clamp(c.x+Math.cos(ang)*80,20,world.w-20), y:clamp(c.y+Math.sin(ang)*80,20,world.h-20),
+            radius:15, hp:addHp, maxHp:addHp, dmg:addDmg, speed:rand(70,110), expValue:6, brute:false,
+            hitTimers:{}, lastTouch:-9999 });
+        }
+        showBanner("👹 "+c.name+" memanggil bala bantuan!");
+      }
+    }
+
+    if(c.passive === "regen" && (mode!=="multiplayer" || isHost()) && !c.netBoss){
+      if(now - (c.lastHitAt||0) > BOSS_REGEN_IDLE && c.hp < c.maxHp){
+        c.hp = Math.min(c.maxHp, c.hp + c.maxHp*BOSS_REGEN_RATE*dt);
+      }
+    }
+  }
+}
+
+// eases a networked boss mirror's position toward the host's latest broadcast, same trick used for
+// remote players — and drops the mirror if the host goes quiet for a while (disconnect/migration),
+// so a "ghost boss" can never linger forever, invulnerable, after its real owner is gone
+function updateNetBossInterp(dt){
+  const smooth = 1 - Math.exp(-10*dt);
+  const now = performance.now();
+  for(const c of creeps){
+    if(!c.netBoss || c.hp<=0) continue;
+    if(now - (c.lastNetSync||now) > 6000){ c.hp = 0; continue; }
+    if(c.targetX!=null){
+      c.x += (c.targetX-c.x)*smooth;
+      c.y += (c.targetY-c.y)*smooth;
+    }
+  }
+}
+
+function applyNetBossState(b){
+  let c = creeps.find(cc=>cc.boss && cc.netId===b.id);
+  const now = performance.now();
+  if(!c){
+    c = {
+      id: uid(), netId: b.id, netBoss: true,
+      x:b.x, y:b.y, targetX:b.x, targetY:b.y,
+      radius:b.radius, hp:b.hp, maxHp:b.maxHp, dmg:b.dmg, speed:b.speed,
+      expValue:b.expValue, boss:true, brute:false, name:b.name,
+      passive:b.passive, spawnedAt:b.spawnedAt, lastNetSync: now,
+      hitTimers:{}, lastTouch:-9999,
+    };
+    creeps.push(c);
+    const pdef = BOSS_PASSIVES.find(bp=>bp.key===b.passive);
+    showBanner("⚠ "+b.name+" MUNCUL! "+(pdef?pdef.icon+" "+pdef.label:""));
+    playBossRoar();
+  } else {
+    c.targetX = b.x; c.targetY = b.y;
+    c.hp = b.hp; c.maxHp = b.maxHp; c.dmg = b.dmg; c.speed = b.speed;
+    c.lastNetSync = now;
+  }
+}
+function clearNetBoss(){
+  for(const c of creeps){ if(c.boss && c.netBoss) c.hp = 0; }
+}
+
+// central choke point for all boss damage: blocks it during a shield window, and — for a guest's
+// networked boss mirror — forwards it to the host (who owns the real hp) instead of mutating locally.
+// Returns true if the hit should show normal damage feedback, false if it was blocked.
+function applyDamageToCreep(c, dmg){
+  if(c.boss && c.shieldActive){
+    spawnFloater(c.x, c.y-c.radius-6, "🛡️ Diblokir!", "#8be9ff");
+    return false;
+  }
+  if(c.boss && c.netBoss){
+    if(channel) channel.send({type:"broadcast", event:"bossHit", payload:{ netId:c.netId, dmg, fromId:myId }});
+    return true;
+  }
+  c.hp -= dmg;
+  if(c.boss) c.lastHitAt = performance.now();
+  if(c.hp<=0) killCreep(c);
+  return true;
 }
 
 function updateCreeps(dt){
@@ -1137,16 +1306,24 @@ function updateCreeps(dt){
 
     const dx = player.x-c.x, dy = player.y-c.y;
     const d = Math.hypot(dx,dy)||1;
+    if(c.netBoss){
+      // a networked boss mirror: position comes from the host via updateNetBossInterp(), not local chase AI
+      if(d < c.radius + player.radius){
+        tryDamagePlayer(player, c.dmg*(c._enrageDmgMult||1), c);
+      }
+      continue;
+    }
     if(d > CREEP_DESPAWN_RADIUS){ c.hp = 0; continue; } // far behind — recycle it, a fresh one will spawn nearby instead
     const stopDist = c.radius + player.radius - 4; // hover just inside contact range, stays in blade sweep zone
     if(d > stopDist){
-      c.x += dx/d*c.speed*dt;
-      c.y += dy/d*c.speed*dt;
+      const spd = c.boss ? c.speed*(c._enrageSpeedMult||1) : c.speed;
+      c.x += dx/d*spd*dt;
+      c.y += dy/d*spd*dt;
     }
 
     // contact damage to player
     if(d < c.radius + player.radius){
-      tryDamagePlayer(player, c.dmg, c);
+      tryDamagePlayer(player, c.boss ? c.dmg*(c._enrageDmgMult||1) : c.dmg, c);
     }
   }
   // light mutual separation so creeps don't stack exactly on top of each other
@@ -1188,15 +1365,15 @@ function trySwordHits(p, targetsAreCreeps){
           if(now-last > HIT_COOLDOWN){
             c.hitTimers[i] = now;
             const dmg = swords[i].dmg * p.bonusDmgMult;
-            c.hp -= dmg;
-            spawnFloater(c.x, c.y-c.radius, "-"+Math.round(dmg), "#ffd43b");
-            if(swords[i].lifesteal){
-              const healed = dmg*swords[i].lifesteal;
-              p.hp = Math.min(p.maxHp, p.hp + healed);
-              spawnFloater(p.x, p.y-p.radius-20, "+"+Math.round(healed), "#ff6b9d");
-            }
             playClang();
-            if(c.hp<=0){ killCreep(c); }
+            if(applyDamageToCreep(c, dmg)){
+              spawnFloater(c.x, c.y-c.radius, "-"+Math.round(dmg), "#ffd43b");
+              if(swords[i].lifesteal){
+                const healed = dmg*swords[i].lifesteal;
+                p.hp = Math.min(p.maxHp, p.hp + healed);
+                spawnFloater(p.x, p.y-p.radius-20, "+"+Math.round(healed), "#ff6b9d");
+              }
+            }
           }
         }
       }
@@ -1283,6 +1460,11 @@ function killCreep(c){
     bladePacks.push({ x:c.x, y:c.y, pack: pickBossBladePack(), id: uid() });
     for(let i=0;i<3;i++){
       pickups.push({ x:c.x+rand(-40,40), y:c.y+rand(-40,40), tier: weightedBruteTier(), id: uid() });
+    }
+    // in multiplayer, tell everyone else the shared boss is down so their mirror dies too and they
+    // each get their own kill credit + reward, even though only the host's copy actually tracked the hp
+    if(mode==="multiplayer" && channel && !c.netBoss){
+      channel.send({type:"broadcast", event:"bossDeath", payload:{ netId:c.id, x:c.x, y:c.y, name:c.name, expValue:c.expValue }});
     }
     return;
   }
@@ -1373,6 +1555,44 @@ function connectMultiplayer(){
     if(existing){ merged.x = existing.x; merged.y = existing.y; }
     else { merged.x = payload.x; merged.y = payload.y; }
     remotePlayers.set(payload.id, merged);
+
+    // the current host piggybacks the shared boss's live hp/position on its regular state packet —
+    // cheaper than a separate broadcast, and keeps every player's boss mirror in sync automatically
+    if(payload.id === currentHostId()){
+      if(payload.boss) applyNetBossState(payload.boss);
+      else if(payload.bossGone) clearNetBoss();
+    }
+  });
+
+  channel.on("broadcast", {event:"bossSpawn"}, ({payload})=>{
+    applyNetBossState(payload);
+  });
+
+  channel.on("broadcast", {event:"bossHit"}, ({payload})=>{
+    if(!isHost()) return; // only the host's copy holds the real hp value
+    const c = creeps.find(cc=>cc.boss && cc.id===payload.netId && cc.hp>0);
+    if(!c || c.shieldActive) return;
+    c.hp -= payload.dmg;
+    c.lastHitAt = performance.now();
+    if(c.hp<=0) killCreep(c);
+  });
+
+  channel.on("broadcast", {event:"bossDeath"}, ({payload})=>{
+    const c = creeps.find(cc=>cc.boss && cc.netBoss && cc.netId===payload.netId);
+    if(c) c.hp = 0;
+    showBanner("💀 "+payload.name+" TUMBANG!");
+    playBossDeath();
+    gainExp(player, payload.expValue||140, payload.x, payload.y);
+    kills++;
+    bladePacks.push({ x:payload.x, y:payload.y, pack: pickBossBladePack(), id: uid() });
+    for(let i=0;i<3;i++){
+      pickups.push({ x:payload.x+rand(-40,40), y:payload.y+rand(-40,40), tier: weightedBruteTier(), id: uid() });
+    }
+  });
+
+  channel.on("broadcast", {event:"orbSpawn"}, ({payload})=>{
+    if(skillOrbs.some(o=>o.id===payload.id)) return;
+    skillOrbs.push({ x:payload.x, y:payload.y, skillKey:payload.skillKey, id:payload.id });
   });
 
   channel.on("broadcast", {event:"hit"}, ({payload})=>{
@@ -1412,7 +1632,7 @@ function broadcastState(){
   const now = performance.now();
   if(now - lastBroadcast < BROADCAST_INTERVAL) return;
   lastBroadcast = now;
-  channel.send({ type:"broadcast", event:"state", payload:{
+  const payload = {
     id: myId, name: playerName, color: myColor,
     x: player.x, y: player.y, level: player.level,
     hp: player.hp, maxHp: player.maxHp,
@@ -1420,7 +1640,20 @@ function broadcastState(){
     spinAngle: player.spinAngle,
     orbitR: orbitRadius(player),
     pvp: pvpMode,
-  }});
+  };
+  // only the host's packet carries boss state — everyone else skips their own local boss in multiplayer
+  // entirely (see updateBossSpawning) and mirrors the host's copy instead, so it stays in sync for free
+  if(isHost()){
+    const boss = creeps.find(c=>c.boss && c.hp>0 && !c.netBoss);
+    if(boss){
+      payload.boss = { id:boss.id, x:boss.x, y:boss.y, hp:boss.hp, maxHp:boss.maxHp, dmg:boss.dmg,
+        speed:boss.speed, radius:boss.radius, name:boss.name, passive:boss.passive,
+        spawnedAt:boss.spawnedAt, expValue:boss.expValue };
+    } else {
+      payload.bossGone = true;
+    }
+  }
+  channel.send({ type:"broadcast", event:"state", payload });
 }
 
 function pruneRemotePlayers(){
@@ -1493,6 +1726,7 @@ function loop(t){
   updateCreepSpawning(dt);
   updateBossSpawning(dt);
   updateCreeps(dt);
+  updateBossPassives(dt);
   trySwordHits(player, true);
   trySwordsmanBladeHits();
   trySwordVsSwordsmanClash();
@@ -1502,6 +1736,7 @@ function loop(t){
 
   if(mode==="multiplayer"){
     updateRemoteInterpolation(dt);
+    updateNetBossInterp(dt);
     broadcastState();
     checkPvpHits();
     pruneRemotePlayers();
@@ -1803,6 +2038,10 @@ function drawBoss(c, s){
   ctx.fillStyle = "#ffd43b";
   ctx.beginPath(); ctx.arc(s.x-10, s.y-4, 4, 0, Math.PI*2); ctx.fill();
   ctx.beginPath(); ctx.arc(s.x+10, s.y-4, 4, 0, Math.PI*2); ctx.fill();
+  if(c.shieldActive){
+    ctx.beginPath(); ctx.arc(s.x, s.y, c.radius*1.55, 0, Math.PI*2);
+    ctx.strokeStyle = "rgba(120,220,255,0.85)"; ctx.lineWidth = 4; ctx.stroke();
+  }
 }
 
 function drawPickup(pu){
@@ -1858,7 +2097,9 @@ function updateBossBarUI(){
   box.classList.remove("hidden");
   const shownMax = Math.round(boss.maxHp);
   const shownHp = Math.min(shownMax, Math.max(0, Math.round(boss.hp)));
-  document.getElementById("bossName").textContent = boss.name+" — "+shownHp+" / "+shownMax;
+  const pdef = BOSS_PASSIVES.find(b=>b.key===boss.passive);
+  const tag = (pdef? " "+pdef.icon : "") + (boss.shieldActive? " 🛡️" : "");
+  document.getElementById("bossName").textContent = boss.name+tag+" — "+shownHp+" / "+shownMax;
   document.getElementById("bossbar-fill").style.width = clamp(boss.hp/boss.maxHp,0,1)*100+"%";
 }
 
@@ -2037,7 +2278,7 @@ const ENEMY_INFO = [
   { key:"swordsman", label:"Musuh Bersenjata", color:"#c58bff", icon:"⚔️",
     desc:"Punya blade sendiri yang ikut muter. Bisa ambil pedang di field buat naikin kekuatan, dan bisa beradu blade — yang lebih lemah bakal pecah." },
   { key:"boss", label:"Boss", color:"#ff2d4d", icon:"💀",
-    desc:"Muncul tiap gelombang (3 menit sekali). HP dan damage-nya besar, tapi selalu drop Blade Pack + pedang bagus kalau dikalahin." },
+    desc:"HP dan damage-nya besar, dan tiap muncul dapet 1 skill pasif acak (Regenerasi/Amukan/Gelombang Kejut/Panggilan/Perisai) biar tiap fight kerasa beda. Di multiplayer boss-nya sama persis buat semua pemain. Selalu drop Blade Pack + pedang bagus kalau dikalahin." },
 ];
 function renderEnemyGallery(){
   document.getElementById("enemyGallery").innerHTML = ENEMY_INFO.map(e=>`
