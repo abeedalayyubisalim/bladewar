@@ -118,6 +118,28 @@
     border: 2px solid rgba(255,255,255,0.4);
   }
 
+  #skillbar{
+    position:absolute; right:18px; bottom:18px; display:flex; gap:12px; z-index:6;
+  }
+  .skillslot{
+    position:relative; width:58px; height:58px; border-radius:16px;
+    background: rgba(15,17,28,0.75); border:2px solid #333955;
+    display:flex; align-items:center; justify-content:center;
+    font-size:26px; cursor:pointer; user-select:none; -webkit-user-select:none;
+    touch-action:manipulation;
+  }
+  .skillslot.ready{ border-color: rgba(255,255,255,0.5); }
+  .skillslot.empty{ opacity:0.45; font-size:20px; color:var(--text-dim); cursor:default; }
+  .skill-key{
+    position:absolute; top:2px; left:5px; font-size:10px; font-weight:700; color: var(--text-dim);
+  }
+  .skill-cd{
+    position:absolute; inset:0; border-radius:14px; background: rgba(0,0,0,0.65);
+    display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:800;
+    color:#fff; pointer-events:none;
+  }
+  .skill-cd:empty{ display:none; }
+
   /* ---------- Results ---------- */
   #results{
     position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background: rgba(5,6,10,0.85); z-index:20;
@@ -128,6 +150,34 @@
   .result-stats{ display:flex; justify-content:space-around; margin: 18px 0; }
   .result-stats div{ font-size:22px; font-weight:800; }
   .result-stats span{ display:block; font-size:11px; color:var(--text-dim); font-weight:500; margin-top:2px;}
+
+  /* ---------- Gallery ---------- */
+  #galleryModal{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    background: rgba(5,6,10,0.85); z-index:30;
+  }
+  .gallery-card{
+    background: var(--panel); border:1px solid #2b3050; border-radius:16px; padding:24px 26px;
+    width:min(480px,92vw); max-height:82vh; display:flex; flex-direction:column;
+  }
+  .gallery-tabs{ display:flex; gap:8px; margin-bottom:14px; }
+  .gtab{
+    flex:1; padding:9px; border-radius:9px; border:1px solid #333955; background:#171a2b; color:var(--text-dim);
+    font-weight:700; font-size:13px; cursor:pointer;
+  }
+  .gtab.active{ background:#262b45; color:var(--text); border-color:var(--accent-2); }
+  .gallery-body{ overflow-y:auto; flex:1; margin-bottom:14px; padding-right:4px; }
+  .gitem{
+    display:flex; gap:12px; padding:12px; border-radius:12px; background:#171a2b; margin-bottom:10px;
+    border-left:4px solid #444;
+  }
+  .gitem-icon{
+    width:40px; height:40px; border-radius:10px; flex-shrink:0; display:flex; align-items:center; justify-content:center;
+    font-size:20px; font-weight:800; background:#0f111c;
+  }
+  .gitem-body h4{ margin:0 0 3px; font-size:14px; }
+  .gitem-body .meta{ font-size:11px; color:var(--text-dim); margin-bottom:4px; }
+  .gitem-body p{ margin:0; font-size:12.5px; color:#c3c7db; line-height:1.4; }
 
   #connstatus{
     position:absolute; bottom:14px; left:14px; font-size:11px; color: var(--text-dim);
@@ -157,6 +207,7 @@
       <input type="text" id="roomInput" maxlength="16" placeholder="public" value="public">
     </div>
     <button class="btn btn-mp" id="btnMulti">🌐 Masuk Multiplayer</button>
+    <button class="btn btn-secondary" id="btnGallery">📖 Galeri Pedang &amp; Skill</button>
 
     <div id="leaderboard">
       <h3>Top Survival</h3>
@@ -190,7 +241,24 @@
   <div id="joystick-base"><div id="joystick-stick"></div></div>
 </div>
 
+<div id="skillbar" class="hidden">
+  <div class="skillslot" data-slot="0"><span class="skill-icon">?</span><span class="skill-key">Z</span><div class="skill-cd"></div></div>
+  <div class="skillslot" data-slot="1"><span class="skill-icon">?</span><span class="skill-key">X</span><div class="skill-cd"></div></div>
+  <div class="skillslot" data-slot="2"><span class="skill-icon">?</span><span class="skill-key">C</span><div class="skill-cd"></div></div>
+</div>
+
 <div id="connstatus" class="hidden"><span class="dot" id="connDot"></span><span id="connText">offline</span></div>
+
+<div id="galleryModal" class="hidden">
+  <div class="gallery-card">
+    <div class="gallery-tabs">
+      <button class="gtab active" data-tab="swords">⚔ Pedang</button>
+      <button class="gtab" data-tab="skills">✨ Skill</button>
+    </div>
+    <div id="galleryBody" class="gallery-body"></div>
+    <button class="btn btn-secondary" id="btnCloseGallery">Tutup</button>
+  </div>
+</div>
 
 <div id="results" class="hidden">
   <div class="result-card">
@@ -221,10 +289,16 @@ try{
 }catch(e){ console.warn("Supabase init failed", e); }
 
 const SWORD_TIERS = [
-  { key:"common",    label:"Common",    color:"#c7ccd8", dmg:3,  weight:55 },
-  { key:"rare",      label:"Rare",      color:"#4dabf7", dmg:6,  weight:30 },
-  { key:"epic",      label:"Epic",      color:"#b563ff", dmg:11, weight:12 },
-  { key:"legendary", label:"Legendary", color:"#ffa94d", dmg:20, weight:3  },
+  { key:"common",    label:"Common",        color:"#c7ccd8", dmg:3,  weight:48, lifesteal:0,
+    desc:"Pedang dasar yang gampang ditemuin di mana-mana. Damage standar." },
+  { key:"rare",      label:"Rare",          color:"#4dabf7", dmg:6,  weight:27, lifesteal:0,
+    desc:"Lebih tajam dari pedang biasa, damage lumayan gede." },
+  { key:"epic",      label:"Epic",          color:"#b563ff", dmg:11, weight:11, lifesteal:0,
+    desc:"Pedang langka dengan damage besar dan aura ungu yang keren." },
+  { key:"legendary", label:"Legendary",     color:"#ffa94d", dmg:20, weight:3,  lifesteal:0,
+    desc:"Pedang terkuat di arena. Damage paling gede, jarang banget nemunya." },
+  { key:"vampiric",  label:"Vampiric Fang", color:"#ff2d78", dmg:9,  weight:9,  lifesteal:0.22,
+    desc:"Setiap serangan yang kena musuh langsung menyembuhkan sebagian HP kamu (lifesteal 22%). Cocok buat bertahan lama." },
 ];
 const MAX_SWORDS = 10;
 const GROW_UNTIL = 6; // freely add swords until this many; after that, only upgrade if stronger than your weakest
@@ -236,6 +310,24 @@ const BASE_SPIN_SPEED = 2.6; // rad/s
 const SPIN_SPEED_PER_LEVEL = 0.045;
 const SWORD_VISUAL_LEN = 34;
 const BLADE_HALF_WIDTH = 11;
+const MAX_SKILL_SLOTS = 3;
+
+const SKILLS = [
+  { key:"electric", label:"Petir",  icon:"⚡", color:"#4dd8ff",
+    desc:"Menyambar hingga 4 musuh terdekat di sekitarmu dengan damage instan.",
+    cooldown: 6000, baseDmg: 16, range: 560, maxTargets: 4 },
+  { key:"blood", label:"Darah", icon:"🩸", color:"#ff4d6d",
+    desc:"Ledakan darah di sekitarmu — menghantam semua musuh dekat dan menyembuhkan HP-mu sebesar setengah damage yang dihasilkan.",
+    cooldown: 8000, baseDmg: 9, radius: 150, lifestealPct: 0.5 },
+  { key:"poison", label:"Racun", icon:"☠", color:"#7bd93a",
+    desc:"Menciptakan awan racun di bawah kakimu. Musuh yang berdiri di dalamnya kena damage terus-menerus selama beberapa detik.",
+    cooldown: 9000, tickDmg: 4, duration: 4000, radius: 115, tickEvery: 500 },
+  { key:"heal", label:"Heal", icon:"✚", color:"#51cf66",
+    desc:"Langsung memulihkan sebagian besar HP-mu. Skill penyelamat di saat kritis.",
+    cooldown: 15000, healPct: 0.35 },
+];
+function skillByKey(key){ return SKILLS.find(s=>s.key===key); }
+function skillLevelMult(level){ return 1 + (level-1)*0.25; } // +25% effect per level (max lvl 5 => +100%)
 
 function pickTier(){
   const total = SWORD_TIERS.reduce((s,t)=>s+t.weight,0);
@@ -304,6 +396,17 @@ function playLevelUp(){
 }
 function playHurt(){ playTone(160, 0.15, "sawtooth", 0.14, 70); }
 function playDeath(){ playTone(320, 0.6, "sawtooth", 0.18, 50); }
+function playZap(){
+  playTone(rand(1000,1400), 0.1, "sawtooth", 0.13, 200);
+  playTone(rand(2000,2600), 0.06, "square", 0.06);
+}
+function playBlood(){
+  playTone(180, 0.22, "sawtooth", 0.16, 90);
+  playTone(320, 0.18, "sine", 0.1, 140);
+}
+function playPoison(){ playTone(260, 0.25, "triangle", 0.12, 150); }
+function playHeal(){ playTone(500, 0.16, "sine", 0.14, 780); setTimeout(()=>playTone(700,0.18,"sine",0.12,1000), 100); }
+function playSkillGet(){ playTone(600, 0.1, "sine", 0.13, 1100); setTimeout(()=>playTone(900,0.12,"sine",0.1,1400), 80); }
 
 /* ================= CANVAS ================= */
 const canvas = document.getElementById("game");
@@ -313,7 +416,12 @@ window.addEventListener("resize", resize); resize();
 
 /* ================= INPUT ================= */
 const keys = {};
-window.addEventListener("keydown", e=>{ keys[e.key.toLowerCase()]=true; });
+const SKILL_KEYS = { "z":0, "x":1, "c":2 };
+window.addEventListener("keydown", e=>{
+  const k = e.key.toLowerCase();
+  keys[k]=true;
+  if(k in SKILL_KEYS) activateSkillSlot(SKILL_KEYS[k]);
+});
 window.addEventListener("keyup", e=>{ keys[e.key.toLowerCase()]=false; });
 
 const joy = { active:false, dx:0, dy:0, id:null };
@@ -350,6 +458,13 @@ joyZone.addEventListener("touchend", e=>{
   for(const t of e.changedTouches){ if(t.identifier===joy.id) joyEnd(); }
 }, {passive:false});
 
+document.querySelectorAll(".skillslot").forEach(el=>{
+  const idx = parseInt(el.dataset.slot, 10);
+  const fire = (e)=>{ e.preventDefault(); activateSkillSlot(idx); };
+  el.addEventListener("click", fire);
+  el.addEventListener("touchstart", fire, {passive:false});
+});
+
 /* ================= GAME STATE ================= */
 let mode = null; // "survival" | "multiplayer"
 let world = { w: 4000, h: 4000 };
@@ -374,10 +489,15 @@ const myPlayerId = getPersistentPlayerId();
 let player = null;
 let creeps = [];
 let pickups = [];
+let skillOrbs = [];
 let particles = [];
 let floaters = []; // floating damage/exp text
 
 let camera = { x:0, y:0 };
+let skillSeq = 0;
+let lightnings = [];   // {x1,y1,x2,y2,life,color}
+let novaEffects = [];  // {x,y,radius,maxRadius,life,maxLife,color}
+let poisonZones = [];  // {x,y,radius,expiresAt,tickDmg,tickEvery,lastCreepTick:{},lastRemoteTick:{},owner}
 
 // Multiplayer
 let channel = null;
@@ -394,6 +514,7 @@ function newPlayer(){
     level: 1, exp: 0,
     swords: [ { ...SWORD_TIERS[0] } ],
     bonusDmgMult: 1,
+    skills: [null, null, null],
     spinAngle: 0,
     facing: 0,
     lastHitAt: -9999,
@@ -425,6 +546,172 @@ function addSword(p, tier){
   }
   p.bonusDmgMult += 0.02;
   return false;
+}
+
+/* ---------- Skills ---------- */
+function addSkill(p, key){
+  const existing = p.skills.find(s=>s && s.key===key);
+  if(existing){
+    existing.level = Math.min(5, existing.level+1);
+    return { leveled:true, key, level:existing.level };
+  }
+  const emptyIdx = p.skills.findIndex(s=>!s);
+  if(emptyIdx !== -1){
+    p.skills[emptyIdx] = { key, level:1, cooldownUntil:0, seq:++skillSeq };
+    return { added:true, key, slot:emptyIdx };
+  }
+  let oldestIdx = 0;
+  for(let i=1;i<p.skills.length;i++) if(p.skills[i].seq < p.skills[oldestIdx].seq) oldestIdx = i;
+  const oldKey = p.skills[oldestIdx].key;
+  p.skills[oldestIdx] = { key, level:1, cooldownUntil:0, seq:++skillSeq };
+  return { replaced:true, key, oldKey, slot:oldestIdx };
+}
+
+function getNearbyTargets(x, y, range){
+  const list = [];
+  for(const c of creeps){
+    if(c.hp<=0) continue;
+    const d = Math.hypot(c.x-x, c.y-y);
+    if(d<=range) list.push({ type:"creep", ref:c, x:c.x, y:c.y, d });
+  }
+  if(mode==="multiplayer"){
+    for(const [id,rp] of remotePlayers){
+      const d = Math.hypot(rp.x-x, rp.y-y);
+      if(d<=range) list.push({ type:"remote", ref:rp, id, x:rp.x, y:rp.y, d });
+    }
+  }
+  list.sort((a,b)=>a.d-b.d);
+  return list;
+}
+
+function damageTarget(t, dmg, healOnHitPct){
+  if(t.type==="creep"){
+    const c = t.ref;
+    c.hp -= dmg;
+    spawnFloater(c.x, c.y-c.radius, "-"+Math.round(dmg), "#ffd43b");
+    if(healOnHitPct){
+      player.hp = Math.min(player.maxHp, player.hp + dmg*healOnHitPct);
+    }
+    if(c.hp<=0) killCreep(c);
+  } else if(t.type==="remote" && channel){
+    channel.send({type:"broadcast", event:"hit", payload:{ targetId:t.id, dmg, fromId:myId }});
+    spawnFloater(t.x, t.y-20, "-"+Math.round(dmg), "#ffd43b");
+    if(healOnHitPct){
+      player.hp = Math.min(player.maxHp, player.hp + dmg*healOnHitPct);
+    }
+  }
+}
+
+function runSkillEffect(def, slot, p){
+  const mult = skillLevelMult(slot.level);
+  if(def.key === "electric"){
+    const targets = getNearbyTargets(p.x, p.y, def.range).slice(0, def.maxTargets);
+    const dmg = def.baseDmg*mult;
+    for(const t of targets){
+      lightnings.push({ x1:p.x, y1:p.y, x2:t.x, y2:t.y, life:0.22, color:def.color });
+      damageTarget(t, dmg, 0);
+    }
+    playZap();
+  } else if(def.key === "blood"){
+    const targets = getNearbyTargets(p.x, p.y, def.radius);
+    const dmg = def.baseDmg*mult;
+    novaEffects.push({ x:p.x, y:p.y, radius:10, maxRadius:def.radius, life:0.4, maxLife:0.4, color:def.color });
+    for(const t of targets){ damageTarget(t, dmg, def.lifestealPct); }
+    playBlood();
+  } else if(def.key === "poison"){
+    poisonZones.push({
+      x:p.x, y:p.y, radius:def.radius,
+      expiresAt: performance.now()+def.duration,
+      tickDmg: def.tickDmg*mult, tickEvery: def.tickEvery,
+      lastCreepTick: {}, lastRemoteTick: {},
+    });
+    playPoison();
+  } else if(def.key === "heal"){
+    const healed = p.maxHp*def.healPct*mult;
+    p.hp = Math.min(p.maxHp, p.hp + healed);
+    spawnFloater(p.x, p.y-p.radius-20, "+"+Math.round(healed), "#51cf66");
+    playHeal();
+  }
+}
+
+function activateSkillSlot(idx){
+  if(!running || !player || player.dead) return;
+  const slot = player.skills[idx];
+  if(!slot) return;
+  const now = performance.now();
+  if(now < slot.cooldownUntil) return;
+  const def = skillByKey(slot.key);
+  if(!def) return;
+  runSkillEffect(def, slot, player);
+  const cdReduction = Math.min(0.3, (slot.level-1)*0.08);
+  slot.cooldownUntil = now + def.cooldown*(1-cdReduction);
+}
+
+function updateSkillEffects(dt){
+  for(let i=lightnings.length-1;i>=0;i--){ lightnings[i].life -= dt; if(lightnings[i].life<=0) lightnings.splice(i,1); }
+  for(let i=novaEffects.length-1;i>=0;i--){
+    const n = novaEffects[i];
+    n.life -= dt;
+    n.radius = n.maxRadius*(1-n.life/n.maxLife);
+    if(n.life<=0) novaEffects.splice(i,1);
+  }
+  const now = performance.now();
+  for(let i=poisonZones.length-1;i>=0;i--){
+    const z = poisonZones[i];
+    if(now > z.expiresAt){ poisonZones.splice(i,1); continue; }
+    for(const c of creeps){
+      if(c.hp<=0) continue;
+      if(Math.hypot(c.x-z.x, c.y-z.y) > z.radius+c.radius) continue;
+      const last = z.lastCreepTick[c.id] || 0;
+      if(now-last >= z.tickEvery){
+        z.lastCreepTick[c.id] = now;
+        c.hp -= z.tickDmg;
+        spawnFloater(c.x, c.y-c.radius, "-"+Math.round(z.tickDmg), "#7bd93a");
+        if(c.hp<=0) killCreep(c);
+      }
+    }
+    if(mode==="multiplayer" && channel){
+      for(const [id,rp] of remotePlayers){
+        if(Math.hypot(rp.x-z.x, rp.y-z.y) > z.radius+16) continue;
+        const last = z.lastRemoteTick[id] || 0;
+        if(now-last >= z.tickEvery){
+          z.lastRemoteTick[id] = now;
+          channel.send({type:"broadcast", event:"hit", payload:{ targetId:id, dmg:z.tickDmg, fromId:myId }});
+          spawnFloater(rp.x, rp.y-20, "-"+Math.round(z.tickDmg), "#7bd93a");
+        }
+      }
+    }
+  }
+}
+
+/* ---------- Skill orb pickups (field only, session-only) ---------- */
+function spawnSkillOrbsAmbient(dt){
+  state.skillOrbTimer = (state.skillOrbTimer||rand(6,10)) - dt;
+  if(state.skillOrbTimer<=0){
+    state.skillOrbTimer = rand(14,22);
+    if(skillOrbs.length < 6){
+      skillOrbs.push({
+        x: clamp(player.x+rand(-1100,1100), 40, world.w-40),
+        y: clamp(player.y+rand(-1100,1100), 40, world.h-40),
+        skillKey: SKILLS[Math.floor(rand(0,SKILLS.length))].key,
+        id: uid(),
+      });
+    }
+  }
+}
+function updateSkillPickups(){
+  for(let i=skillOrbs.length-1;i>=0;i--){
+    const orb = skillOrbs[i];
+    if(dist2(orb.x,orb.y,player.x,player.y) < (player.radius+16)*(player.radius+16)){
+      const def = skillByKey(orb.skillKey);
+      const result = addSkill(player, orb.skillKey);
+      if(result.leveled) spawnFloater(orb.x,orb.y, def.icon+" "+def.label+" Lv"+result.level, def.color);
+      else if(result.replaced) spawnFloater(orb.x,orb.y, "Ganti: "+def.icon+" "+def.label, def.color);
+      else spawnFloater(orb.x,orb.y, "+Skill "+def.icon+" "+def.label, def.color);
+      playSkillGet();
+      skillOrbs.splice(i,1);
+    }
+  }
 }
 
 function gainExp(p, amount, x, y){
@@ -549,6 +836,11 @@ function trySwordHits(p, targetsAreCreeps){
             const dmg = swords[i].dmg * p.bonusDmgMult;
             c.hp -= dmg;
             spawnFloater(c.x, c.y-c.radius, "-"+Math.round(dmg), "#ffd43b");
+            if(swords[i].lifesteal){
+              const healed = dmg*swords[i].lifesteal;
+              p.hp = Math.min(p.maxHp, p.hp + healed);
+              spawnFloater(p.x, p.y-p.radius-20, "+"+Math.round(healed), "#ff6b9d");
+            }
             playClang();
             if(c.hp<=0){ killCreep(c); }
           }
@@ -567,11 +859,13 @@ function killCreep(c){
     pickups.push({ x:c.x+rand(-10,10), y:c.y+rand(-10,10), tier: c.brute? weightedBruteTier() : pickTier(), id: uid() });
   }
 }
+function tierByKey(key){ return SWORD_TIERS.find(t=>t.key===key); }
 function weightedBruteTier(){
   const r = Math.random();
-  if(r<0.35) return SWORD_TIERS[3];
-  if(r<0.7) return SWORD_TIERS[2];
-  return SWORD_TIERS[1];
+  if(r<0.22) return tierByKey("legendary");
+  if(r<0.45) return tierByKey("vampiric");
+  if(r<0.75) return tierByKey("epic");
+  return tierByKey("rare");
 }
 
 function tryDamagePlayer(p, dmg, source){
@@ -704,6 +998,11 @@ function checkPvpHits(){
           const dmg = player.swords[i].dmg * player.bonusDmgMult;
           channel.send({type:"broadcast", event:"hit", payload:{ targetId:id, dmg, fromId: myId }});
           spawnFloater(rp.x, rp.y-20, "-"+Math.round(dmg), "#ffd43b");
+          if(player.swords[i].lifesteal){
+            const healed = dmg*player.swords[i].lifesteal;
+            player.hp = Math.min(player.maxHp, player.hp + healed);
+            spawnFloater(player.x, player.y-player.radius-20, "+"+Math.round(healed), "#ff6b9d");
+          }
           playClang();
         }
       }
@@ -725,17 +1024,21 @@ function loop(t){
   updatePlayerMovement(dt);
   player.spinAngle += spinSpeed(player)*dt;
 
-  if(mode==="survival"){
-    updateCreepSpawning(dt);
-    updateCreeps(dt);
-    trySwordHits(player, true);
-    spawnPickupsAmbient(dt);
-  } else if(mode==="multiplayer"){
+  // both modes: local creeps, pickups & skill orbs give every player something to farm
+  updateCreepSpawning(dt);
+  updateCreeps(dt);
+  trySwordHits(player, true);
+  spawnPickupsAmbient(dt);
+  spawnSkillOrbsAmbient(dt);
+
+  if(mode==="multiplayer"){
     broadcastState();
     checkPvpHits();
     pruneRemotePlayers();
   }
   updatePickups();
+  updateSkillPickups();
+  updateSkillEffects(dt);
   updateFloaters(dt);
 
   camera.x = player.x;
@@ -787,7 +1090,9 @@ function render(){
   drawGrid();
   drawWorldBounds();
 
+  for(const z of poisonZones) drawPoisonZone(z);
   for(const pu of pickups) drawPickup(pu);
+  for(const orb of skillOrbs) drawSkillOrb(orb);
   for(const c of creeps) if(c.hp>0) drawCreep(c);
 
   if(mode==="multiplayer"){
@@ -796,7 +1101,54 @@ function render(){
 
   drawPlayer(player, myColor, playerName, true);
 
+  for(const n of novaEffects) drawNova(n);
+  for(const l of lightnings) drawLightning(l);
   for(const f of floaters) drawFloater(f);
+}
+
+function drawSkillOrb(orb){
+  const s = worldToScreen(orb.x,orb.y);
+  if(s.x<-40||s.x>canvas.width+40||s.y<-40||s.y>canvas.height+40) return;
+  const def = skillByKey(orb.skillKey);
+  const bob = Math.sin(performance.now()/280 + orb.x)*4;
+  ctx.beginPath();
+  ctx.arc(s.x, s.y+bob, 15, 0, Math.PI*2);
+  ctx.fillStyle = def.color; ctx.shadowColor = def.color; ctx.shadowBlur = 14;
+  ctx.fill(); ctx.shadowBlur = 0;
+  ctx.lineWidth=2; ctx.strokeStyle="rgba(255,255,255,0.6)"; ctx.stroke();
+  ctx.font="14px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
+  ctx.fillStyle="#0b0d14"; ctx.fillText(def.icon, s.x, s.y+bob+1);
+  ctx.textBaseline="alphabetic";
+}
+
+function drawPoisonZone(z){
+  const s = worldToScreen(z.x,z.y);
+  ctx.beginPath();
+  ctx.arc(s.x,s.y,z.radius,0,Math.PI*2);
+  ctx.fillStyle = "rgba(123,217,58,0.16)";
+  ctx.fill();
+  ctx.lineWidth=2; ctx.strokeStyle="rgba(123,217,58,0.5)"; ctx.stroke();
+}
+
+function drawNova(n){
+  const s = worldToScreen(n.x,n.y);
+  ctx.beginPath();
+  ctx.arc(s.x,s.y,Math.max(1,n.radius),0,Math.PI*2);
+  ctx.strokeStyle = n.color; ctx.globalAlpha = clamp(n.life/n.maxLife,0,1)*0.8; ctx.lineWidth = 5;
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
+function drawLightning(l){
+  const a = worldToScreen(l.x1,l.y1), b = worldToScreen(l.x2,l.y2);
+  ctx.save();
+  ctx.globalAlpha = clamp(l.life/0.22,0,1);
+  ctx.strokeStyle = l.color; ctx.lineWidth = 3; ctx.shadowColor = l.color; ctx.shadowBlur = 10;
+  ctx.beginPath();
+  const midx=(a.x+b.x)/2 + rand(-14,14), midy=(a.y+b.y)/2 + rand(-14,14);
+  ctx.moveTo(a.x,a.y); ctx.lineTo(midx,midy); ctx.lineTo(b.x,b.y);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawGrid(){
@@ -949,6 +1301,40 @@ function updateHUD(){
   } else {
     document.getElementById("roster").classList.add("hidden");
   }
+
+  updateSkillBarUI();
+}
+
+const skillSlotEls = [0,1,2].map(i=>document.querySelector(`.skillslot[data-slot="${i}"]`));
+function updateSkillBarUI(){
+  const now = performance.now();
+  for(let i=0;i<3;i++){
+    const el = skillSlotEls[i];
+    if(!el) continue;
+    const slot = player.skills[i];
+    const iconEl = el.querySelector(".skill-icon");
+    const cdEl = el.querySelector(".skill-cd");
+    if(!slot){
+      el.classList.add("empty"); el.classList.remove("ready");
+      iconEl.textContent = "?";
+      el.style.borderColor = "#333955";
+      cdEl.textContent = "";
+      continue;
+    }
+    const def = skillByKey(slot.key);
+    el.classList.remove("empty");
+    iconEl.textContent = def.icon;
+    el.style.borderColor = def.color;
+    const remain = (slot.cooldownUntil-now)/1000;
+    if(remain > 0){
+      el.classList.remove("ready");
+      cdEl.textContent = Math.ceil(remain);
+    } else {
+      el.classList.add("ready");
+      cdEl.textContent = "";
+    }
+    el.title = def.label+" Lv"+slot.level+" — "+def.desc;
+  }
 }
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 
@@ -962,13 +1348,16 @@ function startGame(selMode){
   world = selMode==="survival"? {w:4000,h:4000} : {w:2400,h:2400};
   player = newPlayer();
   player.x = world.w/2; player.y = world.h/2;
-  creeps = []; pickups = []; particles = []; floaters = [];
+  creeps = []; pickups = []; skillOrbs = []; particles = []; floaters = [];
+  lightnings = []; novaEffects = []; poisonZones = [];
+  Object.keys(state).forEach(k=>delete state[k]);
   elapsed = 0; kills = 0; spawnTimer = 0; resultsShown = false;
   remotePlayers.clear();
 
   document.getElementById("menu").classList.add("hidden");
   document.getElementById("results").classList.add("hidden");
   document.getElementById("hud").classList.remove("hidden");
+  document.getElementById("skillbar").classList.remove("hidden");
 
   if(selMode==="multiplayer"){ connectMultiplayer(); }
   else { document.getElementById("connstatus").classList.add("hidden"); }
@@ -991,9 +1380,52 @@ function onPlayerDeath(){
   document.getElementById("btnSubmitScore").classList.toggle("hidden", mode!=="survival");
   document.getElementById("results").classList.remove("hidden");
   document.getElementById("hud").classList.add("hidden");
+  document.getElementById("skillbar").classList.add("hidden");
   if(mode==="multiplayer") disconnectMultiplayer();
   if(mode==="survival") submitScore(); // auto-kirim skor, progress tertinggi per player_id yang kesimpen
 }
+
+/* ================= GALLERY ================= */
+function renderGallery(tab){
+  const body = document.getElementById("galleryBody");
+  if(tab==="swords"){
+    body.innerHTML = SWORD_TIERS.map(t=>`
+      <div class="gitem" style="border-left-color:${t.color}">
+        <div class="gitem-icon" style="color:${t.color}">⚔</div>
+        <div class="gitem-body">
+          <h4 style="color:${t.color}">${t.label}</h4>
+          <div class="meta">Damage dasar: ${t.dmg}${t.lifesteal? " · Lifesteal "+Math.round(t.lifesteal*100)+"%" : ""}</div>
+          <p>${t.desc}</p>
+        </div>
+      </div>`).join("");
+  } else {
+    body.innerHTML = `<div style="font-size:12px; color:var(--text-dim); margin-bottom:10px;">
+      Kamu punya 3 slot skill. Skill cuma didapat dari orb yang muncul di field (dan cuma berlaku selama game berjalan). Nemu skill yang sama lagi = level naik & efeknya makin kuat. Aktifin lewat tombol di layar (mobile) atau tombol <b>Z / X / C</b> (PC).
+    </div>` + SKILLS.map(s=>`
+      <div class="gitem" style="border-left-color:${s.color}">
+        <div class="gitem-icon" style="color:${s.color}">${s.icon}</div>
+        <div class="gitem-body">
+          <h4 style="color:${s.color}">${s.label}</h4>
+          <div class="meta">Cooldown: ${(s.cooldown/1000).toFixed(0)}s</div>
+          <p>${s.desc}</p>
+        </div>
+      </div>`).join("");
+  }
+}
+document.getElementById("btnGallery").addEventListener("click", ()=>{
+  document.getElementById("galleryModal").classList.remove("hidden");
+  renderGallery("swords");
+});
+document.getElementById("btnCloseGallery").addEventListener("click", ()=>{
+  document.getElementById("galleryModal").classList.add("hidden");
+});
+document.querySelectorAll(".gtab").forEach(tabEl=>{
+  tabEl.addEventListener("click", ()=>{
+    document.querySelectorAll(".gtab").forEach(t=>t.classList.remove("active"));
+    tabEl.classList.add("active");
+    renderGallery(tabEl.dataset.tab);
+  });
+});
 
 document.getElementById("btnSurvival").addEventListener("click", ()=>startGame("survival"));
 document.getElementById("btnMulti").addEventListener("click", ()=>startGame("multiplayer"));
