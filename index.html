@@ -94,6 +94,7 @@
     background: rgba(15,17,28,0.7); border:1px solid #2b3050; border-radius:12px; padding:10px 16px; text-align:center; font-size:20px; font-weight:800;
   }
   #timerbox small{ display:block; font-size:10px; color:var(--text-dim); font-weight:500; }
+  #hudWave{ color:#ffa94d !important; font-weight:800; margin-top:2px; }
 
   #roster{
     width:170px; background: rgba(15,17,28,0.7); border:1px solid #2b3050; border-radius:12px; padding:10px 12px;
@@ -253,7 +254,7 @@
       <div class="stat-line"><span>Pedang</span><b id="hudSwords">0</b></div>
       <div class="stat-line"><span>Kills</span><b id="hudKills">0</b></div>
     </div>
-    <div id="timerbox"><span id="hudTimer">00:00</span><small id="hudMode">SURVIVAL</small></div>
+    <div id="timerbox"><span id="hudTimer">00:00</span><small id="hudMode">SURVIVAL</small><small id="hudWave">Gelombang 1</small></div>
     <div id="roster" class="hidden">
       <h4>Arena</h4>
       <div id="rosterList"></div>
@@ -478,6 +479,11 @@ function playBossRoar(){
 function playBossDeath(){
   playTone(250, 0.3, "sawtooth", 0.2, 700);
   setTimeout(()=>playTone(150, 0.5, "sawtooth", 0.2, 40), 150);
+}
+function playWaveUp(){
+  playTone(440, 0.14, "square", 0.14, 900);
+  setTimeout(()=>playTone(560, 0.14, "square", 0.14, 1100), 110);
+  setTimeout(()=>playTone(700, 0.2, "square", 0.16, 1300), 220);
 }
 
 /* ================= CANVAS ================= */
@@ -849,6 +855,26 @@ function showBanner(text){
   bannerTimeout = setTimeout(()=>{ el.style.opacity="0"; }, 1400);
 }
 
+/* ---------- Waves ---------- */
+// every 3 minutes a new wave kicks in: enemies get noticeably tankier and faster on top
+// of the existing smooth time-based scaling, so the game keeps ramping up in clear steps.
+const WAVE_INTERVAL = 180; // seconds
+function currentWave(){ return Math.floor(elapsed/WAVE_INTERVAL) + 1; }
+function waveHpMult(wave){ return 1 + (wave-1)*0.4; }
+function waveSpeedMult(wave){ return Math.min(1 + (wave-1)*0.15, 2.2); } // cap so it never gets literally unplayable
+function waveDmgMult(wave){ return 1 + (wave-1)*0.2; }
+let announcedWave = 1;
+function updateWaveAnnounce(){
+  const w = currentWave();
+  if(w > announcedWave){
+    announcedWave = w;
+    showBanner("🌊 GELOMBANG "+w+"! Musuh makin ganas!");
+    playWaveUp();
+  }
+  const waveEl = document.getElementById("hudWave");
+  if(waveEl) waveEl.textContent = "Gelombang "+announcedWave;
+}
+
 /* ---------- Creeps ---------- */
 function spawnCreep(){
   const brute = elapsed > 60 && Math.random() < Math.min(0.28, elapsed/900);
@@ -862,15 +888,17 @@ function spawnCreep(){
   else { x = margin; y = clamp(player.y + rand(-900,900), margin, world.h-margin); }
 
   const t = elapsed;
-  const hpScale = 1 + t/45;
-  const dmgScale = 1 + t/90;
+  const wave = currentWave();
+  const hpScale = (1 + t/45) * waveHpMult(wave);
+  const dmgScale = (1 + t/90) * waveDmgMult(wave);
+  const spdMult = waveSpeedMult(wave);
   creeps.push({
     id: uid(), x, y,
     radius: brute? 26: 15,
     hp: (brute? 60: 16) * hpScale,
     maxHp: (brute? 60: 16) * hpScale,
     dmg: (brute? 14: 6) * dmgScale,
-    speed: brute? rand(50,70): rand(70,110),
+    speed: (brute? rand(50,70): rand(70,110)) * spdMult,
     expValue: brute? 26: 6,
     brute,
     hitTimers: {},
@@ -904,13 +932,14 @@ function spawnBoss(){
   else { x = margin; y = clamp(player.y + rand(-700,700), margin, world.h-margin); }
 
   const t = elapsed;
-  const hpScale = 1 + t/70;
+  const wave = currentWave();
+  const hpScale = (1 + t/70) * waveHpMult(wave);
   creeps.push({
     id: uid(), x, y,
     radius: 44,
     hp: 420*hpScale, maxHp: 420*hpScale,
-    dmg: 24*(1+t/110),
-    speed: rand(55,72),
+    dmg: 24*(1+t/110)*waveDmgMult(wave),
+    speed: rand(55,72)*waveSpeedMult(wave),
     expValue: 140,
     boss: true, brute:false,
     name: BOSS_NAMES[Math.floor(rand(0,BOSS_NAMES.length))],
@@ -1186,6 +1215,7 @@ function loop(t){
   player.spinAngle += spinSpeed(player)*dt;
 
   // both modes: local creeps, pickups, skill orbs & blade packs give every player something to farm
+  updateWaveAnnounce();
   updateCreepSpawning(dt);
   updateBossSpawning(dt);
   updateCreeps(dt);
@@ -1578,7 +1608,7 @@ function startGame(selMode){
   creeps = []; pickups = []; skillOrbs = []; bladePacks = []; particles = []; floaters = [];
   lightnings = []; novaEffects = []; poisonZones = [];
   Object.keys(state).forEach(k=>delete state[k]);
-  elapsed = 0; kills = 0; spawnTimer = 0; resultsShown = false; nextBossAt = BOSS_FIRST_AT;
+  elapsed = 0; kills = 0; spawnTimer = 0; resultsShown = false; nextBossAt = BOSS_FIRST_AT; announcedWave = 1;
   remotePlayers.clear();
 
   document.getElementById("menu").classList.add("hidden");
