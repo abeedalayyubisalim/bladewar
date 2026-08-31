@@ -122,6 +122,13 @@
   }
   #bossbar-fill{ height:100%; background: linear-gradient(90deg,#8b0000,#ff2d4d); width:100%; transition:width .15s; }
 
+  #minimap-box{
+    position:absolute; left:14px; bottom:14px; width:140px; height:140px;
+    background: rgba(15,17,28,0.68); border:1px solid #2b3050; border-radius:10px;
+    padding:4px; box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  }
+  #minimap{ display:block; width:100%; height:100%; border-radius:6px; }
+
   #joystick-zone{ position:absolute; left:0; bottom:0; width:45%; height:45%; z-index:6; }
   #joystick-base{
     position:absolute; width:110px; height:110px; border-radius:50%; background: rgba(255,255,255,0.07);
@@ -265,6 +272,9 @@
     <div id="bossbar-outer"><div id="bossbar-fill"></div></div>
   </div>
   <div id="banner"></div>
+  <div id="minimap-box">
+    <canvas id="minimap" width="140" height="140"></canvas>
+  </div>
 </div>
 
 <div id="joystick-zone" class="hidden">
@@ -513,6 +523,9 @@ const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 function resize(){ canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
 window.addEventListener("resize", resize); resize();
+
+const minimapCanvas = document.getElementById("minimap");
+const mctx = minimapCanvas.getContext("2d");
 
 /* ================= INPUT ================= */
 const keys = {};
@@ -1741,6 +1754,7 @@ function updateHUD(){
 
   updateSkillBarUI();
   updateBossBarUI();
+  drawMinimap();
 }
 
 function updateBossBarUI(){
@@ -1750,6 +1764,54 @@ function updateBossBarUI(){
   box.classList.remove("hidden");
   document.getElementById("bossName").textContent = boss.name+" — "+Math.max(0,Math.ceil(boss.hp))+" / "+boss.maxHp;
   document.getElementById("bossbar-fill").style.width = clamp(boss.hp/boss.maxHp,0,1)*100+"%";
+}
+
+function drawMinimap(){
+  const w = minimapCanvas.width, h = minimapCanvas.height;
+  mctx.clearRect(0,0,w,h);
+  mctx.fillStyle = "rgba(10,12,20,0.5)";
+  mctx.fillRect(0,0,w,h);
+  const sx = w/world.w, sy = h/world.h;
+
+  // faint grid so the map reads as a place, not just a void
+  mctx.strokeStyle = "rgba(255,255,255,0.06)"; mctx.lineWidth = 1;
+  for(let gx=0; gx<=w; gx+=w/4){ mctx.beginPath(); mctx.moveTo(gx,0); mctx.lineTo(gx,h); mctx.stroke(); }
+  for(let gy=0; gy<=h; gy+=h/4){ mctx.beginPath(); mctx.moveTo(0,gy); mctx.lineTo(w,gy); mctx.stroke(); }
+
+  // other players (multiplayer arena) so you can see rivals too, not just PvE threats
+  if(mode==="multiplayer"){
+    for(const [id,rp] of remotePlayers){
+      mctx.beginPath();
+      mctx.arc(rp.x*sx, rp.y*sy, 3, 0, Math.PI*2);
+      mctx.fillStyle = rp.color || "#88f";
+      mctx.fill();
+    }
+  }
+
+  // every enemy on the map, color-coded by threat type
+  for(const c of creeps){
+    if(c.hp<=0) continue;
+    let r = 2, color = "#8a93b3";
+    if(c.brute){ r = 2.6; color = "#ff6b6b"; }
+    if(c.swordsman){ r = 2.8; color = "#c58bff"; }
+    if(c.boss){ r = 5; color = "#ff2d4d"; }
+    mctx.beginPath();
+    mctx.arc(c.x*sx, c.y*sy, r, 0, Math.PI*2);
+    mctx.fillStyle = color;
+    if(c.boss){ mctx.shadowColor = "#ff2d4d"; mctx.shadowBlur = 6; }
+    mctx.fill();
+    mctx.shadowBlur = 0;
+  }
+
+  // player marker drawn last so it always stands out on top
+  mctx.beginPath();
+  mctx.arc(player.x*sx, player.y*sy, 3.6, 0, Math.PI*2);
+  mctx.fillStyle = "#ffffff";
+  mctx.fill();
+  mctx.lineWidth = 1.5; mctx.strokeStyle = "#4dabf7"; mctx.stroke();
+
+  mctx.strokeStyle = "rgba(255,255,255,0.18)"; mctx.lineWidth = 1;
+  mctx.strokeRect(0.5,0.5,w-1,h-1);
 }
 
 const skillSlotEls = [0,1,2].map(i=>document.querySelector(`.skillslot[data-slot="${i}"]`));
