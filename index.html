@@ -409,7 +409,7 @@
       </div>
     </div>
     <div class="menu-col">
-      <div class="side-panel" style="max-height:none;">
+      <div class="side-panel">
         <h3>Pemain Online</h3>
         <div id="onlineUsersList" class="panel-body"><div class="lb-empty">Memuat…</div></div>
       </div>
@@ -3228,7 +3228,32 @@ function renderOnlineUsers(){
   box.innerHTML = list.map(u=>
     `<div class="lb-row"><span>🟢</span><span style="flex:1">${escapeHtml(u.name)}${u.key===myPlayerId?' <span style="color:var(--text-dim)">(Kamu)</span>':''}</span><span>Lv${u.level||1}</span></div>`
   ).join("");
+  syncPanelHeights();
 }
+
+/* ================= SAMAKAN TINGGI PANEL SAMPING DENGAN CARD PROFIL =================
+   Card profil (.menu-card) tingginya ngikutin konten (avatar, level/XP, badge achievement),
+   jadi bisa berubah-ubah. Riwayat Main + Top Survival (satu kolom) dan Pemain Online (kolom
+   lain) harus ngikutin tinggi itu sebagai patokan, nggak boleh lebih tinggi dari card profil,
+   dan kalau isinya kepanjangan tinggal di-scroll di dalam (.panel-body sudah overflow-y:auto).
+   Dipanggil ulang tiap kali konten yang bisa mengubah tinggi card profil selesai dimuat. */
+function syncPanelHeights(){
+  const screen = document.getElementById("profileScreen");
+  if(!screen || screen.classList.contains("hidden")) return;
+  const card = screen.querySelector(".menu-card");
+  if(!card) return;
+  const cardH = card.offsetHeight;
+  if(!cardH) return;
+  screen.querySelectorAll(".menu-col").forEach(col=>{
+    const panels = Array.from(col.children).filter(el=>
+      el.classList.contains("side-panel") || el.id==="leaderboard");
+    if(panels.length===0) return;
+    const gap = 18; // samain sama gap CSS .menu-col
+    const each = Math.max(120, Math.floor((cardH - gap*(panels.length-1)) / panels.length));
+    panels.forEach(p=>{ p.style.height = each+"px"; p.style.maxHeight = each+"px"; });
+  });
+}
+window.addEventListener("resize", ()=>{ syncPanelHeights(); });
 
 /* ================= SCREEN NAVIGATION ================= */
 function hideAllScreensNav(){
@@ -3237,7 +3262,7 @@ function hideAllScreensNav(){
 }
 function showScreen(id){ hideAllScreensNav(); document.getElementById(id).classList.remove("hidden"); }
 
-function enterProfile(){
+async function enterProfile(){
   document.getElementById("profileName").textContent = playerName + (isGuest? " (Tamu)" : "");
   document.getElementById("profileAvatar").textContent = (playerName||"?").trim().charAt(0).toUpperCase() || "?";
   document.getElementById("profileEmail").textContent = authUser
@@ -3245,10 +3270,10 @@ function enterProfile(){
     : "Main sebagai tamu — progress cuma kesimpen di device ini.";
   showScreen("profileScreen");
   document.getElementById("playModal").classList.add("hidden");
-  loadMatchHistory();
-  loadLeaderboard();
-  loadAccountProgress();
   joinLobbyPresence();
+  syncPanelHeights();
+  await Promise.all([ loadMatchHistory(), loadLeaderboard(), loadAccountProgress() ]);
+  syncPanelHeights();
 }
 
 /* ================= AUTH (login / signup / guest) ================= */
